@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Medicaid Provider Spending Explorer</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --accent:#2a78d6; --accent-deep:#1c5cab;
+  --seq-250:#86b6ef; --seq-300:#6da7ec; --seq-350:#5598e7; --seq-400:#3987e5;
+  --seq-450:#2a78d6; --seq-500:#256abf; --seq-550:#1c5cab; --seq-600:#184f95; --seq-650:#104281;
+  --wash:rgba(42,120,214,.10); --ghost:rgba(42,120,214,.07);
+  --header-bg:#1e1b4b;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+    --accent:#3987e5; --accent-deep:#6da7ec;
+    --wash:rgba(57,135,229,.14); --ghost:rgba(57,135,229,.10);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:var(--header-bg) url(/static/hero-bg.svg) center/cover no-repeat;
+  color:#fff;padding:26px 28px 22px}
+header .brand{display:flex;align-items:center;gap:14px}
+header img{width:44px;height:44px;border-radius:11px;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+header h1{margin:0;font-size:21px;font-weight:650;letter-spacing:.1px}
+header p{margin:3px 0 0;font-size:13px;color:rgba(255,255,255,.75)}
+main{max-width:1240px;margin:0 auto;padding:18px 22px 60px}
+
+/* filter row */
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;
+  background:var(--surface-1);border:1px solid var(--border);border-radius:12px;
+  padding:14px 16px;margin-top:-30px;box-shadow:0 4px 18px rgba(0,0,0,.10)}
+.filters .f{display:flex;flex-direction:column;gap:4px}
+.filters label{font-size:11px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.4px}
+.filters input,.filters select{font:inherit;color:var(--ink-1);background:var(--page);
+  border:1px solid var(--border);border-radius:8px;padding:7px 9px;min-width:0}
+.filters input:focus,.filters select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.filters input[type=text]{width:130px}
+.filters input.money{width:104px}
+.btn{font:inherit;font-weight:600;border:none;border-radius:8px;padding:9px 16px;cursor:pointer}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-deep)}
+.btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--border)}
+.btn.ghost:hover{background:var(--ghost)}
+.chip{font:inherit;font-size:12.5px;border:1px solid var(--border);background:transparent;
+  color:var(--ink-2);border-radius:99px;padding:5px 12px;cursor:pointer}
+.chip:hover{background:var(--ghost)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+
+/* active filter pills */
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:14px 2px 0;min-height:0}
+.pill{display:inline-flex;align-items:center;gap:7px;background:var(--wash);
+  color:var(--ink-1);border:1px solid var(--border);border-radius:99px;
+  padding:4px 7px 4px 12px;font-size:12.5px}
+.pill b{font-weight:600}
+.pill button{all:unset;cursor:pointer;width:17px;height:17px;border-radius:50%;
+  display:grid;place-items:center;color:var(--ink-2);font-size:13px;line-height:1}
+.pill button:hover{background:var(--border);color:var(--ink-1)}
+
+/* KPI tiles */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0 4px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:13px 15px}
+.tile .lbl{font-size:12px;color:var(--ink-2)}
+.tile .val{font-size:24px;font-weight:600;margin-top:2px}
+.tile .sub{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+
+/* insights */
+.insights{display:flex;flex-wrap:wrap;gap:8px;margin:12px 2px 4px}
+.insight{font-size:12.5px;color:var(--ink-2);background:var(--surface-1);
+  border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:8px;padding:7px 11px}
+.insight b{color:var(--ink-1);font-weight:600}
+
+/* chart cards */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;
+  padding:16px 18px 12px;min-width:0}
+.card.wide{grid-column:1/-1}
+.card h3{margin:0;font-size:14.5px;font-weight:650}
+.card .why{font-size:11.5px;color:var(--ink-3);margin:2px 0 8px}
+.card .why em{font-style:normal;color:var(--accent-deep);font-weight:600}
+.metric-tabs{display:flex;gap:6px;margin:8px 0 2px}
+.chartbox{position:relative}
+.chartbox svg{display:block;width:100%;height:auto}
+.loading .chartbox, .loading .kpis, .loading .insights, .loading .tablewrap{opacity:.45;transition:opacity .15s}
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.bar-hit{cursor:pointer}
+.tooltip{position:fixed;pointer-events:none;z-index:50;background:var(--surface-1);
+  border:1px solid var(--border);border-radius:9px;box-shadow:0 6px 22px rgba(0,0,0,.18);
+  padding:8px 11px;font-size:12.5px;display:none;max-width:290px}
+.tooltip .tt-title{color:var(--ink-2);font-size:11.5px;margin-bottom:4px}
+.tooltip .tt-row{display:flex;align-items:center;gap:7px}
+.tooltip .tt-key{width:12px;height:0;border-top:3px solid var(--accent);border-radius:2px}
+.tooltip .tt-val{font-weight:650}
+.tooltip .tt-lbl{color:var(--ink-2)}
+
+/* table */
+.tablewrap{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;
+  margin-top:14px;overflow:hidden}
+.tablehead{display:flex;justify-content:space-between;align-items:center;padding:13px 18px 0}
+.tablehead h3{margin:0;font-size:14.5px}
+.pager{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--ink-2)}
+.tscroll{overflow-x:auto;padding:6px 8px 10px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 12px;text-align:right;white-space:nowrap}
+th:nth-child(-n+4),td:nth-child(-n+4){text-align:left}
+td{border-top:1px solid var(--grid);font-variant-numeric:tabular-nums}
+th{color:var(--ink-2);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
+th:hover{color:var(--ink-1)}
+th .arrow{font-size:10px}
+tbody tr:hover{background:var(--ghost)}
+td.null{color:var(--ink-3)}
+
+/* empty state */
+.empty{display:none;text-align:center;padding:44px 0 30px}
+.empty img{width:280px;max-width:80%}
+.empty p{color:var(--ink-2);margin:10px 0 0}
+.note{font-size:11.5px;color:var(--ink-3);margin-top:18px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="/static/logo.svg" alt="">
+    <div>
+      <h1>Medicaid Provider Spending Explorer</h1>
+      <p id="subtitle">Loading dataset…</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="filters" id="filters">
+    <div class="f">
+      <label>Date range</label>
+      <div class="presets" id="presets"></div>
+    </div>
+    <div class="f"><label>From</label><select id="f-from"></select></div>
+    <div class="f"><label>To</label><select id="f-to"></select></div>
+    <div class="f"><label>HCPCS code(s)</label><input type="text" id="f-hcpcs" placeholder="e.g. T1019, 99213"></div>
+    <div class="f"><label>Billing NPI</label><input type="text" id="f-billing" placeholder="10-digit NPI"></div>
+    <div class="f"><label>Servicing NPI</label><input type="text" id="f-servicing" placeholder="10-digit NPI"></div>
+    <div class="f"><label>Paid / row ≥</label><input type="text" class="money" id="f-min" placeholder="$ min"></div>
+    <div class="f"><label>Paid / row ≤</label><input type="text" class="money" id="f-max" placeholder="$ max"></div>
+    <button class="btn primary" id="apply">Apply</button>
+    <button class="btn ghost" id="reset">Reset</button>
+  </div>
+  <div class="pills" id="pills"></div>
+
+  <div id="content">
+    <div class="kpis" id="kpis"></div>
+    <div class="insights" id="insights"></div>
+    <div class="grid" id="charts"></div>
+    <div class="tablewrap" id="tablewrap">
+      <div class="tablehead">
+        <h3>Rows <span id="rowcount" style="color:var(--ink-3);font-weight:400;font-size:12px"></span></h3>
+        <div class="pager">
+          <button class="chip" id="prev">‹ Prev</button>
+          <span id="pageinfo"></span>
+          <button class="chip" id="next">Next ›</button>
+        </div>
+      </div>
+      <div class="tscroll"><table id="table"></table></div>
+    </div>
+  </div>
+
+  <div class="empty" id="empty">
+    <img src="/static/empty-state.svg" alt="">
+    <p>No rows match your filters. Try widening the date range or clearing a filter.</p>
+  </div>
+
+  <p class="note">Source: medicaid-provider-spending.csv (238M rows, 2018–2024). Note: the raw data
+  contains a handful of implausibly large payment values (single rows in the trillions) — use the
+  “Exclude extreme rows” preset or a Paid ≤ filter to screen them out. Blank NPIs appear as “—”.</p>
+</main>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = {
+  month_from:"", month_to:"", hcpcs:"", billing_npi:"", servicing_npi:"",
+  paid_min:"", paid_max:"",
+  metric:"paid", sort:"paid", dir:"desc", page:0,
+};
+let META = null, DASH = null, seq = 0;
+
+/* ---------- formatting ---------- */
+function fmtMoney(v){
+  if (v==null) return "—";
+  const a = Math.abs(v);
+  if (a>=1e12) return "$"+(v/1e12).toFixed(2)+"T";
+  if (a>=1e9)  return "$"+(v/1e9).toFixed(2)+"B";
+  if (a>=1e6)  return "$"+(v/1e6).toFixed(1)+"M";
+  if (a>=1e4)  return "$"+(v/1e3).toFixed(0)+"K";
+  if (a>=10 || v===0) return "$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  return "$"+v.toLocaleString(undefined,{maximumFractionDigits:2});
+}
+function fmtNum(v){
+  if (v==null) return "—";
+  const a = Math.abs(v);
+  if (a>=1e9) return (v/1e9).toFixed(2)+"B";
+  if (a>=1e6) return (v/1e6).toFixed(1)+"M";
+  if (a>=1e4) return (v/1e3).toFixed(0)+"K";
+  return v.toLocaleString();
+}
+const fmtFull = v => v==null ? "—" : "$"+v.toLocaleString(undefined,{maximumFractionDigits:2});
+function fmtMonth(m){
+  const [y,mo] = m.split("-");
+  return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+mo-1]+" "+y;
+}
+const METRICS = {
+  paid:{label:"Total paid", fmt:fmtMoney, full:fmtFull},
+  patients:{label:"Patients", fmt:fmtNum, full:v=>v.toLocaleString()},
+  claim_lines:{label:"Claim lines", fmt:fmtNum, full:v=>v.toLocaleString()},
+};
+
+/* ---------- filters / state ---------- */
+function activeFilters(){
+  const f = {};
+  for (const k of ["month_from","month_to","hcpcs","billing_npi","servicing_npi","paid_min","paid_max"])
+    if (state[k]) f[k] = state[k];
+  return f;
+}
+const qs = f => new URLSearchParams(f).toString();
+
+function readInputs(){
+  state.month_from = $("f-from").value === META.months[0] ? "" : $("f-from").value;
+  state.month_to = $("f-to").value === META.months[META.months.length-1] ? "" : $("f-to").value;
+  state.hcpcs = $("f-hcpcs").value.trim();
+  state.billing_npi = $("f-billing").value.trim();
+  state.servicing_npi = $("f-servicing").value.trim();
+  state.paid_min = $("f-min").value.trim().replace(/[$,]/g,"");
+  state.paid_max = $("f-max").value.trim().replace(/[$,]/g,"");
+  state.page = 0;
+}
+function writeInputs(){
+  $("f-from").value = state.month_from || META.months[0];
+  $("f-to").value = state.month_to || META.months[META.months.length-1];
+  $("f-hcpcs").value = state.hcpcs;
+  $("f-billing").value = state.billing_npi;
+  $("f-servicing").value = state.servicing_npi;
+  $("f-min").value = state.paid_min;
+  $("f-max").value = state.paid_max;
+}
+
+const PILL_LABELS = {month_from:"From", month_to:"To", hcpcs:"HCPCS",
+  billing_npi:"Billing NPI", servicing_npi:"Servicing NPI", paid_min:"Paid ≥", paid_max:"Paid ≤"};
+function renderPills(){
+  const box = $("pills"); box.textContent = "";
+  for (const [k,v] of Object.entries(activeFilters())){
+    const pill = document.createElement("span"); pill.className = "pill";
+    const b = document.createElement("b"); b.textContent = PILL_LABELS[k]+": ";
+    const t = document.createTextNode(k.startsWith("paid") ? fmtMoney(+v)
+      : k.startsWith("month") ? fmtMonth(v) : v);
+    const x = document.createElement("button"); x.textContent = "×";
+    x.title = "Remove filter";
+    x.onclick = () => { state[k] = ""; writeInputs(); refresh(); };
+    pill.append(b, t, x); box.append(pill);
+  }
+}
+
+/* ---------- tooltip ---------- */
+const tt = $("tooltip");
+function showTip(x, y, title, rows){
+  tt.textContent = "";
+  const h = document.createElement("div"); h.className = "tt-title"; h.textContent = title;
+  tt.append(h);
+  for (const r of rows){
+    const row = document.createElement("div"); row.className = "tt-row";
+    const key = document.createElement("span"); key.className = "tt-key";
+    if (r.color) key.style.borderTopColor = r.color;
+    const val = document.createElement("span"); val.className = "tt-val"; val.textContent = r.value;
+    const lbl = document.createElement("span"); lbl.className = "tt-lbl"; lbl.textContent = r.label;
+    row.append(key, val, lbl); tt.append(row);
+  }
+  tt.style.display = "block";
+  const w = tt.offsetWidth, hh = tt.offsetHeight;
+  tt.style.left = Math.min(x+14, innerWidth-w-10)+"px";
+  tt.style.top = Math.max(8, Math.min(y-hh-12, innerHeight-hh-10))+"px";
+}
+const hideTip = () => tt.style.display = "none";
+
+/* ---------- SVG helpers ---------- */
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const [k,v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.append(e);
+  return e;
+}
+function niceTicks(max, n=4){
+  if (max<=0) return [0,1];
+  const step = Math.pow(10, Math.floor(Math.log10(max/n)));
+  const err = max/n/step;
+  const m = err>=5 ? 10 : err>=2 ? 5 : err>=1 ? 2 : 1;
+  const s = m*step, ticks = [];
+  for (let v=0; v<=max*1.0001; v+=s) ticks.push(v);
+  return ticks;
+}
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+/* ---------- line chart (trend) ---------- */
+function lineChart(box, data, metric){
+  box.textContent = "";
+  const W=560, H=230, m={t:14,r:14,b:26,l:52};
+  const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":"trend chart"},box);
+  const iw=W-m.l-m.r, ih=H-m.t-m.b;
+  if (!data.length) return;
+  const vals = data.map(d=>d[metric]);
+  const maxV = Math.max(...vals,1);
+  const ticks = niceTicks(maxV);
+  const yMax = ticks[ticks.length-1] || maxV;
+  const X = i => m.l + (data.length===1 ? iw/2 : i*iw/(data.length-1));
+  const Y = v => m.t + ih - (v/yMax)*ih;
+  const fm = METRICS[metric];
+  for (const tv of ticks){
+    el("line",{x1:m.l,x2:W-m.r,y1:Y(tv),y2:Y(tv),stroke:css("--grid"),"stroke-width":1},svg);
+    el("text",{x:m.l-7,y:Y(tv)+3.5,"text-anchor":"end","font-size":10,fill:css("--ink-3"),
+      "font-variant-numeric":"tabular-nums"},svg).textContent = fm.fmt(tv).replace("$","$");
+  }
+  el("line",{x1:m.l,x2:W-m.r,y1:m.t+ih,y2:m.t+ih,stroke:css("--baseline"),"stroke-width":1},svg);
+  const step = Math.ceil(data.length/7);
+  data.forEach((d,i)=>{ if (i%step===0)
+    el("text",{x:X(i),y:H-8,"text-anchor":"middle","font-size":10,fill:css("--ink-3")},svg)
+      .textContent = fmtMonth(d.month); });
+  const line = data.map((d,i)=>`${i?"L":"M"}${X(i)},${Y(d[metric])}`).join("");
+  el("path",{d:`${line}L${X(data.length-1)},${Y(0)}L${X(0)},${Y(0)}Z`,fill:css("--wash")},svg);
+  el("path",{d:line,fill:"none",stroke:css("--accent"),"stroke-width":2,
+    "stroke-linejoin":"round","stroke-linecap":"round"},svg);
+  const last = data.length-1;
+  el("circle",{cx:X(last),cy:Y(data[last][metric]),r:4.5,fill:css("--accent"),
+    stroke:css("--surface-1"),"stroke-width":2},svg);
+  el("text",{x:X(last)-8,y:Y(data[last][metric])-9,"text-anchor":"end","font-size":11,
+    "font-weight":600,fill:css("--ink-1")},svg).textContent = fm.fmt(data[last][metric]);
+  // crosshair + hover
+  const cross = el("line",{y1:m.t,y2:m.t+ih,stroke:css("--baseline"),"stroke-width":1,visibility:"hidden"},svg);
+  const dot = el("circle",{r:4.5,fill:css("--accent"),stroke:css("--surface-1"),"stroke-width":2,visibility:"hidden"},svg);
+  const hit = el("rect",{x:m.l,y:m.t,width:iw,height:ih,fill:"transparent"},svg);
+  hit.addEventListener("pointermove", ev=>{
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX-r.left)*(W/r.width);
+    const i = Math.max(0,Math.min(data.length-1,
+      Math.round((px-m.l)/(iw/Math.max(1,data.length-1)))));
+    cross.setAttribute("x1",X(i)); cross.setAttribute("x2",X(i));
+    cross.setAttribute("visibility","visible");
+    dot.setAttribute("cx",X(i)); dot.setAttribute("cy",Y(data[i][metric]));
+    dot.setAttribute("visibility","visible");
+    showTip(ev.clientX, ev.clientY, fmtMonth(data[i].month), [
+      {value:fm.full(data[i][metric]), label:fm.label, color:css("--accent")},
+    ]);
+  });
+  hit.addEventListener("pointerleave", ()=>{
+    cross.setAttribute("visibility","hidden"); dot.setAttribute("visibility","hidden"); hideTip();
+  });
+}
+
+/* ---------- horizontal bar chart (top-N, sequential) ---------- */
+const SEQ = ["--seq-650","--seq-600","--seq-550","--seq-500","--seq-450",
+             "--seq-400","--seq-350","--seq-300","--seq-250","--seq-250","--seq-250","--seq-250"];
+function barChart(box, items, opts){
+  box.textContent = "";
+  const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:118};
+  const W=560, H=m.t+m.b+rows*rowH;
+  const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":opts.title},box);
+  if (!rows) return;
+  const iw = W-m.l-m.r;
+  const maxV = Math.max(...items.map(d=>d.paid),1);
+  items.forEach((d,i)=>{
+    const y = m.t+i*rowH, bh = Math.min(20,rowH-6);
+    const bw = Math.max(2,(d.paid/maxV)*iw);
+    const color = css(SEQ[Math.min(i,SEQ.length-1)]);
+    const label = d.key===null||d.key===undefined||d.key==="" ? "—" : d.key;
+    el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
+      .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+    el("path",{d:`M${m.l},${y}h${Math.max(0,bw-4)}a4,4 0 0 1 4,4v${bh-8}a4,4 0 0 1 -4,4h${-Math.max(0,bw-4)}z`,
+      fill:color},svg);
+    el("text",{x:m.l+bw+7,y:y+bh/2+4,"font-size":11,"font-weight":600,fill:css("--ink-2"),
+      "font-variant-numeric":"tabular-nums"},svg).textContent = fmtMoney(d.paid);
+    const hit = el("rect",{x:0,y:y-3,width:W,height:rowH,fill:"transparent",class:"bar-hit",
+      tabindex:0,role:"button"},svg);
+    const tip = ev => showTip(ev.clientX ?? innerWidth/2, ev.clientY ?? innerHeight/2,
+      opts.itemLabel+" "+label, [
+        {value:fmtFull(d.paid), label:"total paid", color},
+        {value:fmtNum(d.patients), label:"patients"},
+        {value:fmtNum(d.claim_lines), label:"claim lines"},
+        {value:"Click to filter to this "+opts.itemLabel.toLowerCase(), label:""},
+      ]);
+    hit.addEventListener("pointermove",tip);
+    hit.addEventListener("focus",tip);
+    hit.addEventListener("pointerleave",hideTip);
+    hit.addEventListener("blur",hideTip);
+    const drill = () => { hideTip(); opts.onClick(d.key); };
+    hit.addEventListener("click",drill);
+    hit.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" ") drill(); });
+  });
+  el("line",{x1:m.l,x2:m.l,y1:m.t,y2:m.t+rows*rowH-4,stroke:css("--baseline"),"stroke-width":1},svg);
+}
+
+/* ---------- histogram (payment size) ---------- */
+function histChart(box, hist){
+  box.textContent = "";
+  const W=1160, H=200, m={t:14,r:14,b:34,l:56};
+  const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":"payment size distribution"},box);
+  if (!hist.length) return;
+  const iw=W-m.l-m.r, ih=H-m.t-m.b;
+  const lo = hist[0].bucket, hi = hist[hist.length-1].bucket;
+  const buckets = [];
+  for (let b=lo;b<=hi;b++) buckets.push(hist.find(h=>h.bucket===b) || {bucket:b,n:0,paid:0});
+  const maxN = Math.max(...buckets.map(b=>b.n),1);
+  const ticks = niceTicks(maxN);
+  const yMax = ticks[ticks.length-1]||maxN;
+  const bw = iw/buckets.length;
+  const Y = v => m.t+ih-(v/yMax)*ih;
+  for (const tv of ticks){
+    el("line",{x1:m.l,x2:W-m.r,y1:Y(tv),y2:Y(tv),stroke:css("--grid"),"stroke-width":1},svg);
+    el("text",{x:m.l-7,y:Y(tv)+3.5,"text-anchor":"end","font-size":10,fill:css("--ink-3"),
+      "font-variant-numeric":"tabular-nums"},svg).textContent = fmtNum(tv);
+  }
+  const rangeLabel = b => b<=-2 ? "<10¢" : b===-1 ? "10¢–$1" :
+    fmtMoney(Math.pow(10,b)).replace(".00","")+"–"+fmtMoney(Math.pow(10,b+1)).replace(".00","");
+  const labelStep = buckets.length>11 ? 2 : 1;
+  buckets.forEach((b,i)=>{
+    const x = m.l+i*bw+bw*0.5, w = Math.min(24, bw-4);
+    const h = Math.max(b.n?2:0,(b.n/yMax)*ih);
+    if (h>0)
+      el("path",{d:`M${x-w/2},${m.t+ih}v${-(Math.max(0,h-4))}a4,4 0 0 1 4,-4h${w-8}a4,4 0 0 1 4,4v${Math.max(0,h-4)}z`,
+        fill:css("--seq-450")},svg);
+    if (i%labelStep===0)
+      el("text",{x,y:H-14,"text-anchor":"middle","font-size":9.8,fill:css("--ink-3")},svg)
+        .textContent = rangeLabel(b.bucket);
+    const hit = el("rect",{x:m.l+i*bw,y:m.t,width:bw,height:ih,fill:"transparent"},svg);
+    hit.addEventListener("pointermove",ev=>showTip(ev.clientX,ev.clientY,
+      "Rows paid "+rangeLabel(b.bucket),[
+        {value:b.n.toLocaleString(),label:"rows",color:css("--seq-450")},
+        {value:fmtMoney(b.paid),label:"total paid"},
+      ]));
+    hit.addEventListener("pointerleave",hideTip);
+  });
+  el("line",{x1:m.l,x2:W-m.r,y1:m.t+ih,y2:m.t+ih,stroke:css("--baseline"),"stroke-width":1},svg);
+}
+
+/* ---------- KPI tiles ---------- */
+function renderKpis(s){
+  const box = $("kpis"); box.textContent = "";
+  const tiles = [
+    ["Total paid", fmtMoney(s.paid), fmtFull(s.paid)],
+    ["Patient-months", fmtNum(s.patients), s.patients.toLocaleString()],
+    ["Claim lines", fmtNum(s.claim_lines), s.claim_lines.toLocaleString()],
+    ["Rows", fmtNum(s.rows), s.rows.toLocaleString()],
+    ["HCPCS codes", fmtNum(s.hcpcs_n), ""],
+    ["Billing providers", fmtNum(s.billing_n), ""],
+  ];
+  for (const [lbl,val,sub] of tiles){
+    const t = document.createElement("div"); t.className = "tile";
+    const l = document.createElement("div"); l.className = "lbl"; l.textContent = lbl;
+    const v = document.createElement("div"); v.className = "val"; v.textContent = val;
+    t.append(l,v);
+    if (sub){ const su = document.createElement("div"); su.className = "sub"; su.textContent = sub; t.append(su); }
+    box.append(t);
+  }
+}
+
+/* ---------- auto insights ---------- */
+function renderInsights(d){
+  const box = $("insights"); box.textContent = "";
+  const add = parts => {
+    const s = document.createElement("div"); s.className = "insight";
+    for (const p of parts){
+      if (p.b){ const b=document.createElement("b"); b.textContent=p.b; s.append(b); }
+      else s.append(document.createTextNode(p.t));
+    }
+    box.append(s);
+  };
+  const sum = d.summary;
+  if (!sum.rows) return;
+  if (d.top_hcpcs.length && sum.paid>0 && !state.hcpcs){
+    const t = d.top_hcpcs[0];
+    add([{t:"Code "},{b:t.key},{t:" accounts for "},{b:(100*t.paid/sum.paid).toFixed(1)+"%"},
+         {t:" of spending in this view"}]);
+  }
+  if (d.monthly.length>1){
+    const peak = d.monthly.reduce((a,b)=>b.paid>a.paid?b:a);
+    add([{t:"Peak month: "},{b:fmtMonth(peak.month)},{t:" at "},{b:fmtMoney(peak.paid)}]);
+    const a = d.monthly[d.monthly.length-2].paid, b = d.monthly[d.monthly.length-1].paid;
+    if (a>0){
+      const pct = 100*(b-a)/a;
+      add([{b:fmtMonth(d.monthly[d.monthly.length-1].month)},{t:" was "},
+           {b:(pct>=0?"+":"")+pct.toFixed(1)+"%"},{t:" vs the prior month"}]);
+    }
+  }
+  if (sum.rows && sum.patients>0)
+    add([{t:"Average paid per claim line: "},{b:fmtMoney(sum.paid/Math.max(1,sum.claim_lines))}]);
+}
+
+/* ---------- adaptive chart selection ---------- */
+function chartPlan(){
+  const plan = [];
+  const singleCode = state.hcpcs && !state.hcpcs.includes(",");
+  const codeTxt = state.hcpcs.toUpperCase();
+  if (state.hcpcs)
+    plan.push({data:"top_servicing", title:"Top servicing providers · "+codeTxt,
+      why:["Auto-selected because you filtered to ",codeTxt], itemLabel:"NPI", drill:"servicing_npi"});
+  if (state.billing_npi)
+    plan.push({data:"top_hcpcs", title:"Top HCPCS codes · billing NPI "+state.billing_npi,
+      why:["Auto-selected because you filtered to billing NPI ",state.billing_npi],
+      itemLabel:"Code", drill:"hcpcs"});
+  if (state.servicing_npi)
+    plan.push({data:"top_hcpcs", title:"Top HCPCS codes · servicing NPI "+state.servicing_npi,
+      why:["Auto-selected because you filtered to servicing NPI ",state.servicing_npi],
+      itemLabel:"Code", drill:"hcpcs"});
+  if (!plan.some(p=>p.data==="top_hcpcs") && (!singleCode || !state.hcpcs))
+    plan.push({data:"top_hcpcs", title:"Top HCPCS codes by spending",
+      why:null, itemLabel:"Code", drill:"hcpcs"});
+  if (!plan.some(p=>p.data==="top_billing") && plan.length<2 && !state.billing_npi)
+    plan.push({data:"top_billing", title:"Top billing providers",
+      why:null, itemLabel:"NPI", drill:"billing_npi"});
+  // dedupe on data key, cap at 2 bar charts
+  const seen = new Set(), out = [];
+  for (const p of plan){ if (!seen.has(p.data)){ seen.add(p.data); out.push(p); } }
+  if (out.length<2 && !seen.has("top_billing") && !state.billing_npi)
+    out.push({data:"top_billing", title:"Top billing providers", why:null, itemLabel:"NPI", drill:"billing_npi"});
+  return out.slice(0,2);
+}
+
+function card(parent, title, why, wide){
+  const c = document.createElement("div"); c.className = "card"+(wide?" wide":"");
+  const h = document.createElement("h3"); h.textContent = title; c.append(h);
+  const w = document.createElement("div"); w.className = "why";
+  if (why){ const em=document.createElement("em"); em.textContent="Auto "; w.append(em);
+    for (const part of why) w.append(document.createTextNode(part)); }
+  else w.textContent = " ";
+  c.append(w);
+  const box = document.createElement("div"); box.className = "chartbox"; c.append(box);
+  parent.append(c);
+  return {c, box};
+}
+
+function renderCharts(d){
+  const grid = $("charts"); grid.textContent = "";
+  // trend card with metric tabs
+  const fm = METRICS[state.metric];
+  const scope = state.hcpcs ? " · "+state.hcpcs.toUpperCase()
+    : state.billing_npi ? " · NPI "+state.billing_npi
+    : state.servicing_npi ? " · NPI "+state.servicing_npi : "";
+  const tcard = card(grid, fm.label+" by month"+scope,
+    scope?["Trend re-scoped to your current filters"]:null, true);
+  const tabs = document.createElement("div"); tabs.className = "metric-tabs";
+  for (const [k,mt] of Object.entries(METRICS)){
+    const b = document.createElement("button");
+    b.className = "chip"+(k===state.metric?" on":"");
+    b.textContent = mt.label;
+    b.onclick = () => { state.metric = k; renderCharts(DASH); };
+    tabs.append(b);
+  }
+  tcard.c.insertBefore(tabs, tcard.box);
+  lineChart(tcard.box, d.monthly, state.metric);
+  // adaptive top-N bars
+  for (const p of chartPlan()){
+    const bc = card(grid, p.title, p.why, false);
+    barChart(bc.box, d[p.data], {title:p.title, itemLabel:p.itemLabel,
+      onClick:key=>{ if (key==null) return;
+        state[p.drill] = String(key); writeInputs(); refresh(); }});
+  }
+  // histogram
+  const hc = card(grid, "Payment size per row", null, true);
+  hc.c.querySelector(".why").textContent = "Distribution of paid amounts across rows in this view (log-scale buckets). Hover for counts.";
+  histChart(hc.box, d.hist);
+}
+
+/* ---------- table ---------- */
+const COLS = [
+  ["billing_npi","Billing NPI"],["servicing_npi","Servicing NPI"],
+  ["hcpcs","HCPCS"],["month","Month"],
+  ["patients","Patients"],["claim_lines","Claim lines"],["paid","Paid"],
+];
+const PAGE = 25;
+async function loadRows(){
+  const f = activeFilters();
+  const p = qs({...f, sort:state.sort, dir:state.dir,
+    limit:PAGE, offset:state.page*PAGE});
+  const r = await fetch("/api/rows?"+p).then(r=>r.json());
+  const tbl = $("table"); tbl.textContent = "";
+  const thead = document.createElement("thead");
+  const tr = document.createElement("tr");
+  for (const [key,label] of COLS){
+    const th = document.createElement("th");
+    th.textContent = label+" ";
+    if (state.sort===key){
+      const a = document.createElement("span"); a.className="arrow";
+      a.textContent = state.dir==="desc"?"▼":"▲"; th.append(a);
+    }
+    th.onclick = () => {
+      if (state.sort===key) state.dir = state.dir==="desc"?"asc":"desc";
+      else { state.sort = key; state.dir = "desc"; }
+      state.page = 0; loadRows();
+    };
+    tr.append(th);
+  }
+  thead.append(tr); tbl.append(thead);
+  const tbody = document.createElement("tbody");
+  for (const row of r.rows){
+    const tr = document.createElement("tr");
+    row.forEach((v,i)=>{
+      const td = document.createElement("td");
+      if (v===null||v===""){ td.textContent = "—"; td.className = "null"; }
+      else if (COLS[i][0]==="paid") td.textContent = fmtFull(+v);
+      else if (COLS[i][0]==="patients"||COLS[i][0]==="claim_lines") td.textContent = (+v).toLocaleString();
+      else td.textContent = v;
+      tr.append(td);
+    });
+    tbody.append(tr);
+  }
+  tbl.append(tbody);
+  $("pageinfo").textContent = "Page "+(state.page+1);
+  $("prev").disabled = state.page===0;
+  $("next").disabled = r.rows.length<PAGE;
+}
+
+/* ---------- main refresh ---------- */
+async function refresh(){
+  renderPills();
+  const h = qs(activeFilters());
+  history.replaceState(null, "", h ? "#"+h : location.pathname);
+  const my = ++seq;
+  $("content").classList.add("loading");
+  try {
+    const d = await fetch("/api/dashboard?"+qs(activeFilters())).then(r=>r.json());
+    if (my!==seq) return;
+    if (d.error) throw new Error(d.error);
+    DASH = d;
+    const empty = !d.summary.rows;
+    $("empty").style.display = empty ? "block" : "none";
+    $("content").style.display = empty ? "none" : "block";
+    if (!empty){
+      renderKpis(d.summary);
+      renderInsights(d);
+      renderCharts(d);
+      $("rowcount").textContent = "· "+d.summary.rows.toLocaleString()+" matching";
+      await loadRows();
+    }
+  } finally {
+    if (my===seq) $("content").classList.remove("loading");
+  }
+}
+
+/* ---------- presets & init ---------- */
+function setupPresets(){
+  const months = META.months, last = months[months.length-1];
+  const presets = [
+    ["All time", ()=>{ state.month_from=""; state.month_to=""; }],
+    ["Last 12 mo", ()=>{ state.month_from = months[Math.max(0,months.length-12)]; state.month_to=""; }],
+    ["2024", ()=>{ state.month_from="2024-01"; state.month_to="2024-12"; }],
+    ["Exclude extreme rows", ()=>{ state.paid_max = "100000000"; }],
+  ];
+  const box = $("presets");
+  for (const [label,fn] of presets){
+    const b = document.createElement("button"); b.className = "chip"; b.textContent = label;
+    b.onclick = ()=>{ readInputs(); fn(); writeInputs(); refresh(); };
+    box.append(b);
+  }
+}
+
+async function init(){
+  META = await fetch("/api/meta").then(r=>r.json());
+  $("subtitle").textContent = META.rows.toLocaleString()+" rows · "
+    + fmtMonth(META.months[0])+" – "+fmtMonth(META.months[META.months.length-1])
+    + " · "+fmtMoney(META.total_paid)+" total paid";
+  for (const sel of ["f-from","f-to"]){
+    const s = $(sel);
+    for (const mth of META.months){
+      const o = document.createElement("option"); o.value = mth; o.textContent = fmtMonth(mth);
+      s.append(o);
+    }
+  }
+  setupPresets();
+  const hash = new URLSearchParams(location.hash.slice(1));
+  for (const k of Object.keys(PILL_LABELS)) if (hash.get(k)) state[k] = hash.get(k);
+  writeInputs();
+  $("apply").onclick = ()=>{ readInputs(); refresh(); };
+  $("reset").onclick = ()=>{
+    for (const k of Object.keys(PILL_LABELS)) state[k]="";
+    state.page=0; writeInputs(); refresh();
+  };
+  $("filters").addEventListener("keydown", e=>{ if (e.key==="Enter"){ readInputs(); refresh(); }});
+  $("prev").onclick = ()=>{ if (state.page>0){ state.page--; loadRows(); } };
+  $("next").onclick = ()=>{ state.page++; loadRows(); };
+  refresh();
+}
+init();
+</script>
+</body>
+</html>

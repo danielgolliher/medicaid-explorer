@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" aria-labelledby="title">
+  <title id="title">Medicaid Provider Spending Explorer logo</title>
+  <rect width="48" height="48" rx="12" fill="#312E81"/>
+  <path d="M24 10v28" fill="none" stroke="#2DD4BF" stroke-width="3" stroke-linecap="round"/>
+  <path d="M17 12c8 3.5 8 8.5 0 12s-8 8.5 0 12" fill="none" stroke="#2DD4BF" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M31 12c-8 3.5-8 8.5 0 12s8 8.5 0 12" fill="none" stroke="#2DD4BF" stroke-width="2.5" stroke-linecap="round" opacity=".62"/>
+  <path d="M10 25h6l3-5.5 4.5 11 4-9 3.5 4.5h7" fill="none" stroke="#2DD4BF" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="13" y="31" width="4" height="6" rx="1" fill="#2DD4BF" opacity=".45"/>
+  <rect x="22" y="27" width="4" height="10" rx="1" fill="#2DD4BF" opacity=".45"/>
+  <rect x="31" y="22" width="4" height="15" rx="1" fill="#2DD4BF" opacity=".45"/>
+  <circle cx="24" cy="10" r="3" fill="#2DD4BF"/>
+</svg>

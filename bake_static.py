@@ -1,0 +1,96 @@
+"""Bake static JSON data files for the GitHub Pages build (docs/data/).
+
+The static site can't run DuckDB over the 2.9GB parquet, so it works from
+pre-aggregated cubes:
+  - cube_month_code.json : [monthIdx, codeIdx, paid, patients, claim_lines, n]
+  - cube_code_bucket.json: [codeIdx, bucket, paid, n]
+  - top_providers.json   : per-code and overall top-12 billing/servicing NPIs
+  - top_rows.json        : the 2,000 largest rows by paid (table sample)
+  - meta.json            : months, code list, dataset totals
+  - dash_default.json / dash_outliers.json : the two pre-baked full dashboards
+"""
+import duckdb, json, os, shutil
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+P = os.path.join(HERE, "data", "spending.parquet")
+OUT = os.path.join(HERE, "docs", "data")
+os.makedirs(OUT, exist_ok=True)
+
+con = duckdb.connect()
+con.execute(f"SET threads TO {os.cpu_count() or 8}; SET memory_limit='8GB';")
+
+codes = [r[0] for r in con.execute(
+    f"SELECT DISTINCT hcpcs FROM '{P}' WHERE hcpcs IS NOT NULL ORDER BY hcpcs").fetchall()]
+months = [r[0] for r in con.execute(
+    f"SELECT DISTINCT month FROM '{P}' WHERE month IS NOT NULL ORDER BY month").fetchall()]
+code_idx = {c: i for i, c in enumerate(codes)}
+month_idx = {m: i for i, m in enumerate(months)}
+
+print("cube month x code ...")
+rows = con.execute(f"""
+    SELECT month, hcpcs, round(sum(paid),2), sum(patients), sum(claim_lines), count(*)
+    FROM '{P}' WHERE month IS NOT NULL AND hcpcs IS NOT NULL
+    GROUP BY month, hcpcs
+""").fetchall()
+cube = [[month_idx[m], code_idx[c], p, pt, cl, n] for m, c, p, pt, cl, n in rows]
+with open(os.path.join(OUT, "cube_month_code.json"), "w") as f:
+    json.dump(cube, f, separators=(",", ":"))
+print("  rows:", len(cube))
+
+print("cube code x bucket ...")
+rows = con.execute(f"""
+    SELECT hcpcs, CAST(floor(log10(paid)) AS INT), round(sum(paid),2), count(*)
+    FROM '{P}' WHERE hcpcs IS NOT NULL AND paid > 0
+    GROUP BY 1, 2
+""").fetchall()
+with open(os.path.join(OUT, "cube_code_bucket.json"), "w") as f:
+    json.dump([[code_idx[c], b, p, n] for c, b, p, n in rows], f, separators=(",", ":"))
+
+print("top providers per code ...")
+tops = {}
+for col, key in (("billing_npi", "billing"), ("servicing_npi", "servicing")):
+    rows = con.execute(f"""
+        WITH g AS (
+            SELECT hcpcs, {col} AS npi, round(sum(paid),2) AS paid,
+                   sum(patients) AS patients, sum(claim_lines) AS claim_lines,
+                   row_number() OVER (PARTITION BY hcpcs ORDER BY sum(paid) DESC) AS rk
+            FROM '{P}' WHERE hcpcs IS NOT NULL AND {col} IS NOT NULL
+            GROUP BY hcpcs, {col}
+        )
+        SELECT hcpcs, npi, paid, patients, claim_lines FROM g WHERE rk <= 12
+    """).fetchall()
+    per_code = {}
+    for c, npi, p, pt, cl in rows:
+        per_code.setdefault(code_idx[c], []).append([npi, p, pt, cl])
+    tops[key] = per_code
+    print(f"  {key}: {len(rows)} entries")
+with open(os.path.join(OUT, "top_providers.json"), "w") as f:
+    json.dump(tops, f, separators=(",", ":"))
+
+print("top rows sample ...")
+rows = con.execute(f"""
+    SELECT billing_npi, servicing_npi, hcpcs, month, patients, claim_lines, paid
+    FROM '{P}' ORDER BY paid DESC LIMIT 2000
+""").fetchall()
+with open(os.path.join(OUT, "top_rows.json"), "w") as f:
+    json.dump([list(r) for r in rows], f, separators=(",", ":"))
+
+with open(os.path.join(HERE, "data", "stats.json")) as f:
+    stats = json.load(f)
+stats["codes"] = codes
+with open(os.path.join(OUT, "meta.json"), "w") as f:
+    json.dump(stats, f, separators=(",", ":"))
+
+shutil.copy(os.path.join(HERE, "data", "default_dashboard.json"),
+            os.path.join(OUT, "dash_default.json"))
+# the persisted exclude-outliers cache entry (paid_max=100000000)
+for name in os.listdir(os.path.join(HERE, "data", "cache")):
+    with open(os.path.join(HERE, "data", "cache", name)) as f:
+        entry = json.load(f)
+    if "paid_max" in entry["key"]:
+        with open(os.path.join(OUT, "dash_outliers.json"), "w") as f:
+            json.dump(entry["result"], f, separators=(",", ":"))
+        break
+
+for name in sorted(os.listdir(OUT)):
+    print(f"{name}: {os.path.getsize(os.path.join(OUT, name))/1e6:.1f} MB")

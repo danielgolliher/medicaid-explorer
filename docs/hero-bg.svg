@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 220" width="1600" height="220" aria-labelledby="title">
+  <title id="title">Subtle flowing data-line header background</title>
+  <defs>
+    <linearGradient id="meshA" x1="0" y1="18" x2="1600" y2="202" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0"/>
+      <stop offset=".34" stop-color="#2DD4BF" stop-opacity=".22"/>
+      <stop offset=".66" stop-color="#6366F1" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#6366F1" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="meshB" x1="1600" y1="16" x2="0" y2="208" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6" stop-opacity="0"/>
+      <stop offset=".42" stop-color="#14B8A6" stop-opacity=".16"/>
+      <stop offset=".78" stop-color="#818CF8" stop-opacity=".15"/>
+      <stop offset="1" stop-color="#818CF8" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="softGlow" cx="50%" cy="45%" r="72%">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity=".10"/>
+      <stop offset=".44" stop-color="#4F46E5" stop-opacity=".07"/>
+      <stop offset="1" stop-color="#0F172A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="220" fill="url(#softGlow)"/>
+  <path d="M-60 168C100 110 182 92 312 117c148 28 206 68 360 46 154-23 201-91 356-82 169 10 230 104 382 91 100-9 168-55 250-107" fill="none" stroke="url(#meshA)" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M-40 118C117 81 245 63 386 87c138 24 203 91 334 80 154-13 214-112 368-121 183-11 260 96 420 107 73 5 136-10 197-42" fill="none" stroke="url(#meshB)" stroke-width="2" stroke-linecap="round" opacity=".82"/>
+  <path d="M-30 68C128 95 250 138 392 132c137-6 194-58 320-67 153-10 258 52 406 57 184 6 302-74 514-70" fill="none" stroke="#64748B" stroke-width="1.25" stroke-linecap="round" opacity=".18"/>
+  <path d="M0 188c84-15 154-21 230-12 83 10 144 35 224 25 89-11 128-57 216-61 96-5 151 43 244 42 98-1 155-56 252-57 114-2 180 68 292 54 52-6 100-27 142-53" fill="none" stroke="#2DD4BF" stroke-width="1.2" stroke-linecap="round" opacity=".16"/>
+  <g opacity=".22" fill="#94A3B8">
+    <circle cx="172" cy="107" r="3"/>
+    <circle cx="384" cy="87" r="2.5"/>
+    <circle cx="672" cy="163" r="3"/>
+    <circle cx="1028" cy="82" r="2.75"/>
+    <circle cx="1348" cy="170" r="2.5"/>
+    <circle cx="1506" cy="153" r="3"/>
+  </g>
+  <g opacity=".13" stroke="#94A3B8" stroke-width="1">
+    <path d="M170 107h62"/>
+    <path d="M382 87h74"/>
+    <path d="M1027 82h92"/>
+    <path d="M1346 170h72"/>
+  </g>
+</svg>
