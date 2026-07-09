@@ -1,7 +1,17 @@
 # Medicaid Provider Spending Explorer
 
-Local web app for exploring `medicaid-provider-spending.csv` (238M rows, 11 GB,
-2018–2024). The CSV is converted once to a 2.9 GB Parquet snapshot; a small
+Web app for exploring `medicaid-provider-spending.csv` (238M rows, 11 GB,
+2018–2024).
+
+**Hosted version:** https://danielgolliher.github.io/medicaid-explorer/ — a
+static snapshot served from `docs/` via GitHub Pages, behind a client-side
+password gate. GitHub Pages can't run the DuckDB backend, so the static build
+works from pre-aggregated JSON (`bake_static.py`): month×code and code×bucket
+cubes, per-code top-12 providers, and the 2,000 largest rows. That supports
+date-range and HCPCS filtering with adaptive charts; NPI search and full
+row-level browsing need the local app below. Note the password gate is a
+deterrent, not security — the page and its data are public to anyone who reads
+the JavaScript, and the repo itself is public. The CSV is converted once to a 2.9 GB Parquet snapshot; a small
 Python server answers aggregate queries with DuckDB; the frontend is a single
 HTML page with filters, auto-generated charts, and a sortable row browser.
 
