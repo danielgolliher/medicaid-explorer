@@ -13,6 +13,7 @@ import duckdb, json, os, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 P = os.path.join(HERE, "data", "spending.parquet")
+NPI_LOOKUP = os.path.join(HERE, "data", "npi_state.parquet")
 OUT = os.path.join(HERE, "docs", "data")
 os.makedirs(OUT, exist_ok=True)
 
@@ -84,11 +85,12 @@ for col, key in (("billing_npi", "billing"), ("servicing_npi", "servicing")):
             WHERE billing_state IS NOT NULL AND len(billing_state)=2 AND {col} IS NOT NULL
             GROUP BY billing_state, {col}
         )
-        SELECT st, npi, paid, patients, claim_lines FROM g WHERE rk <= 12
+        SELECT g.st, g.npi, g.paid, g.patients, g.claim_lines, l.name
+        FROM g LEFT JOIN '{NPI_LOOKUP}' l ON g.npi = l.npi WHERE g.rk <= 12
     """).fetchall()
     per_state = {}
-    for s, npi, p, pt, cl in rows:
-        per_state.setdefault(state_idx[s], []).append([npi, p, pt, cl])
+    for s, npi, p, pt, cl, nm in rows:
+        per_state.setdefault(state_idx[s], []).append([npi, p, pt, cl, nm])
     tops_state[key] = per_state
 with open(os.path.join(OUT, "top_providers_state.json"), "w") as f:
     json.dump(tops_state, f, separators=(",", ":"))
@@ -104,11 +106,12 @@ for col, key in (("billing_npi", "billing"), ("servicing_npi", "servicing")):
             FROM '{P}' WHERE hcpcs IS NOT NULL AND {col} IS NOT NULL
             GROUP BY hcpcs, {col}
         )
-        SELECT hcpcs, npi, paid, patients, claim_lines FROM g WHERE rk <= 12
+        SELECT g.hcpcs, g.npi, g.paid, g.patients, g.claim_lines, l.name
+        FROM g LEFT JOIN '{NPI_LOOKUP}' l ON g.npi = l.npi WHERE g.rk <= 12
     """).fetchall()
     per_code = {}
-    for c, npi, p, pt, cl in rows:
-        per_code.setdefault(code_idx[c], []).append([npi, p, pt, cl])
+    for c, npi, p, pt, cl, nm in rows:
+        per_code.setdefault(code_idx[c], []).append([npi, p, pt, cl, nm])
     tops[key] = per_code
     print(f"  {key}: {len(rows)} entries")
 with open(os.path.join(OUT, "top_providers.json"), "w") as f:

@@ -14,6 +14,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PARQUET = os.path.join(HERE, "data", "spending.parquet")
+NPI_LOOKUP = os.path.join(HERE, "data", "npi_state.parquet")
 STATS = os.path.join(HERE, "data", "stats.json")
 PORT = 8734
 
@@ -131,6 +132,18 @@ def _dashboard(q):
     monthly.sort(key=lambda r: r["month"])
     bucket_g.sort(key=lambda r: r["bucket"])
     top = lambda g: sorted(g, key=lambda r: r["paid"], reverse=True)[:TOP_N]
+
+    def with_names(items):
+        npis = [r["key"] for r in items if r["key"]]
+        if not npis or not os.path.exists(NPI_LOOKUP):
+            return items
+        ph = ",".join("?" * len(npis))
+        with con_lock:
+            names = dict(con.execute(
+                f"SELECT npi, name FROM '{NPI_LOOKUP}' WHERE npi IN ({ph})", npis).fetchall())
+        for r in items:
+            r["name"] = names.get(r["key"])
+        return items
     summary["hcpcs_n"] = sum(1 for r in hcpcs_g if r["key"] is not None)
     summary["billing_n"] = sum(1 for r in bill_g if r["key"] is not None)
     summary["servicing_n"] = sum(1 for r in serv_g if r["key"] is not None)
@@ -138,8 +151,8 @@ def _dashboard(q):
         "summary": summary,
         "monthly": monthly,
         "top_hcpcs": top([r for r in hcpcs_g if r["key"] is not None]),
-        "top_billing": top([r for r in bill_g if r["key"] is not None]),
-        "top_servicing": top([r for r in serv_g if r["key"] is not None]),
+        "top_billing": with_names(top([r for r in bill_g if r["key"] is not None])),
+        "top_servicing": with_names(top([r for r in serv_g if r["key"] is not None])),
         "top_states": top([r for r in state_g if r["key"] is not None]),
         "hist": bucket_g,
     }

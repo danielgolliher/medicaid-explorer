@@ -379,7 +379,8 @@ const SEQ = ["--seq-650","--seq-600","--seq-550","--seq-500","--seq-450",
              "--seq-400","--seq-350","--seq-300","--seq-250","--seq-250","--seq-250","--seq-250"];
 function barChart(box, items, opts){
   box.textContent = "";
-  const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:118};
+  const hasNames = items.some(d=>d.name);
+  const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:hasNames?180:118};
   const W=560, H=m.t+m.b+rows*rowH;
   const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":opts.title},box);
   if (!rows) return;
@@ -389,9 +390,16 @@ function barChart(box, items, opts){
     const y = m.t+i*rowH, bh = Math.min(20,rowH-6);
     const bw = Math.max(2,(d.paid/maxV)*iw);
     const color = css(SEQ[Math.min(i,SEQ.length-1)]);
-    const label = d.key===null||d.key===undefined||d.key==="" ? "—" : d.key;
-    el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
-      .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+    const label = d.key===null||d.key===undefined||d.key==="" ? "—" : String(d.key);
+    if (d.name){
+      el("text",{x:m.l-9,y:y+bh/2-1,"text-anchor":"end","font-size":10.5,fill:css("--ink-1")},svg)
+        .textContent = d.name.length>28 ? d.name.slice(0,27)+"…" : d.name;
+      el("text",{x:m.l-9,y:y+bh/2+10,"text-anchor":"end","font-size":9,fill:css("--ink-3"),
+        "font-variant-numeric":"tabular-nums"},svg).textContent = label;
+    } else {
+      el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
+        .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+    }
     el("path",{d:`M${m.l},${y}h${Math.max(0,bw-4)}a4,4 0 0 1 4,4v${bh-8}a4,4 0 0 1 -4,4h${-Math.max(0,bw-4)}z`,
       fill:color},svg);
     el("text",{x:m.l+bw+7,y:y+bh/2+4,"font-size":11,"font-weight":600,fill:css("--ink-2"),
@@ -399,7 +407,7 @@ function barChart(box, items, opts){
     const hit = el("rect",{x:0,y:y-3,width:W,height:rowH,fill:"transparent",class:"bar-hit",
       tabindex:0,role:"button"},svg);
     const tip = ev => showTip(ev.clientX ?? innerWidth/2, ev.clientY ?? innerHeight/2,
-      opts.itemLabel+" "+label, [
+      opts.itemLabel+" "+label+(d.name?" — "+d.name:""), [
         {value:fmtFull(d.paid), label:"total paid", color},
         {value:fmtNum(d.patients), label:"patients"},
         {value:fmtNum(d.claim_lines), label:"claim lines"},
