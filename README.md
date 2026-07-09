@@ -50,6 +50,15 @@ rm -f data/cache/*.json                # drop stale preset caches
   hash, so views are shareable. Light/dark follow the OS.
 - `static/*.svg` — logo, header background, and empty-state art.
 
+## Suggestions board
+
+The hosted page has a "Suggestions" section (same mechanism as the MI Mythos
+briefs' comments): shared comments stored by the `mi-mythos-comments`
+Cloudflare Worker (KV-backed, page key `/medicaid-explorer`, IP-derived
+"Commenter N" identities with optional display names, author-only deletes).
+The Worker source lives in the mi-mythos repo under `comments-backend/`. If
+the Worker is unreachable the board degrades to device-local localStorage.
+
 ## Data caveats
 
 The raw file contains implausible outliers (single rows in the trillions of
