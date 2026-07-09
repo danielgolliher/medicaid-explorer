@@ -3,3 +3,4 @@
 *.log
 nohup.out
 __pycache__/
+.admin_token

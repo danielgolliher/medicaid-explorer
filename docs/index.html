@@ -158,6 +158,14 @@ td.null{color:var(--ink-3)}
 .sg-del{all:unset;cursor:pointer;margin-left:auto;color:var(--ink-3);font-size:12px;padding:2px 6px;border-radius:6px}
 .sg-del:hover{background:var(--ghost);color:var(--ink-1)}
 .sg-body{margin-top:6px;font-size:13.5px;white-space:pre-wrap;overflow-wrap:break-word}
+.sg-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:99px;
+  font-size:11px;font-weight:600;border:1px solid var(--border)}
+.sg-chip.deployed{color:#0ca30c;border-color:rgba(12,163,12,.4)}
+.sg-chip.rolledback{color:var(--ink-3)}
+.sg-chip.rollbackreq{color:#b97e00;border-color:rgba(250,178,25,.45)}
+.sg-back{all:unset;cursor:pointer;color:var(--ink-3);font-size:11.5px;padding:2px 8px;
+  border:1px solid var(--border);border-radius:99px}
+.sg-back:hover{background:var(--ghost);color:var(--ink-1)}
 .sg-none{font-size:12.5px;color:var(--ink-3);margin-top:12px}
 
 .empty{display:none;text-align:center;padding:44px 0 30px}
@@ -1074,6 +1082,27 @@ if (sessionStorage.getItem("mps-unlocked")==="1") unlock();
         when.textContent = new Date(c.createdAt).toLocaleDateString(undefined,
           { month:"short", day:"numeric", year:"numeric" });
         head.append(when);
+      }
+      if (c.status){
+        const chip = document.createElement("span");
+        const cls = c.status==="deployed" ? "deployed" : c.status==="rolled back" ? "rolledback" : "rollbackreq";
+        chip.className = "sg-chip "+cls;
+        chip.textContent = (c.status==="deployed" ? "\u2713 " : c.status==="rolled back" ? "\u21A9 " : "\u23F3 ") + c.status;
+        head.append(chip);
+      }
+      if (c.status==="deployed" && COMMENTS_ENDPOINT){
+        const back = document.createElement("button"); back.className = "sg-back";
+        back.textContent = "Back"; back.title = "Request rollback of this feature";
+        back.onclick = async ()=>{
+          back.disabled = true;
+          try {
+            await fetch(COMMENTS_ENDPOINT.replace(/\/api\/comments\/?$/, "/api/rollback-request"), {
+              method:"POST", headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify({ path: PAGE_KEY, id: c.id }) });
+          } catch(e){ console.warn("rollback request failed", e); }
+          renderList();
+        };
+        head.append(back);
       }
       if (c.author && mine.has(c.author.id)){
         const del = document.createElement("button"); del.className = "sg-del";

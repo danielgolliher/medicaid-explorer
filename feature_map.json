@@ -1,0 +1,7 @@
+{
+  "7ff1c15f-43fb-4e25-8cf7-7b8989e4134d": {
+    "feature": "State filter (billing provider NPPES state)",
+    "commits": ["6f12aee"],
+    "notes": "git revert of these commits rolls the feature back; docs/data cube files revert with them. data/spending.parquet keeps the billing_state column harmlessly."
+  }
+}
