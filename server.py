@@ -48,12 +48,13 @@ def build_where(q):
         if codes:
             clauses.append("upper(hcpcs) IN (%s)" % ",".join("?" * len(codes)))
             params.extend(codes)
-    for field, col in (("billing_npi", "billing_npi"), ("servicing_npi", "servicing_npi")):
+    for field, col in (("billing_npi", "billing_npi"), ("servicing_npi", "servicing_npi"),
+                       ("state", "billing_state")):
         if q.get(field):
             val = q[field][0].strip()
             if val:
                 clauses.append(f"{col} = ?")
-                params.append(val)
+                params.append(val.upper() if field == "state" else val)
     if q.get("paid_min"):
         clauses.append("paid >= ?")
         params.append(float(q["paid_min"][0]))
@@ -67,7 +68,7 @@ def build_where(q):
 def dashboard(q):
     key = json.dumps({k: q[k] for k in sorted(q)
                       if k in ("month_from", "month_to", "hcpcs", "billing_npi",
-                               "servicing_npi", "paid_min", "paid_max")})
+                               "servicing_npi", "state", "paid_min", "paid_max")})
     with dash_cache_lock:
         if key in dash_cache:
             return dash_cache[key]
@@ -88,15 +89,15 @@ def _dashboard(q):
     where, params = build_where(q)
     sql = f"""
         SELECT
-            month, hcpcs, billing_npi, servicing_npi,
+            month, hcpcs, billing_npi, servicing_npi, billing_state,
             CASE WHEN paid > 0 THEN floor(log10(paid)) END AS bucket,
-            GROUPING(month, hcpcs, billing_npi, servicing_npi,
+            GROUPING(month, hcpcs, billing_npi, servicing_npi, billing_state,
                      CASE WHEN paid > 0 THEN floor(log10(paid)) END) AS gid,
             sum(paid) AS paid, sum(patients) AS patients,
             sum(claim_lines) AS claim_lines, count(*) AS n
         FROM '{PARQUET}' {where}
         GROUP BY GROUPING SETS (
-            (), (month), (hcpcs), (billing_npi), (servicing_npi),
+            (), (month), (hcpcs), (billing_npi), (servicing_npi), (billing_state),
             (CASE WHEN paid > 0 THEN floor(log10(paid)) END)
         )
     """
@@ -104,11 +105,11 @@ def _dashboard(q):
         rows = con.execute(sql, params).fetchall()
 
     # GROUPING() bit order follows the column list: month is the high bit,
-    # bucket the low bit. All-grouped-out = 0b11111 = 31.
-    G_TOTAL, G_MONTH, G_HCPCS, G_BILL, G_SERV, G_BUCKET = 31, 15, 23, 27, 29, 30
+    # bucket the low bit. All-grouped-out = 0b111111 = 63.
+    G_TOTAL, G_MONTH, G_HCPCS, G_BILL, G_SERV, G_STATE, G_BUCKET = 63, 31, 47, 55, 59, 61, 62
     summary = {"rows": 0, "paid": 0, "patients": 0, "claim_lines": 0}
-    monthly, hcpcs_g, bill_g, serv_g, bucket_g = [], [], [], [], []
-    for month, hcpcs, bill, serv, bucket, gid, paid, patients, lines, n in rows:
+    monthly, hcpcs_g, bill_g, serv_g, state_g, bucket_g = [], [], [], [], [], []
+    for month, hcpcs, bill, serv, st, bucket, gid, paid, patients, lines, n in rows:
         rec = {"paid": paid or 0, "patients": patients or 0,
                "claim_lines": lines or 0, "n": n}
         if gid == G_TOTAL:
@@ -122,6 +123,8 @@ def _dashboard(q):
             bill_g.append({"key": bill, **rec})
         elif gid == G_SERV:
             serv_g.append({"key": serv, **rec})
+        elif gid == G_STATE:
+            state_g.append({"key": st, **rec})
         elif gid == G_BUCKET and bucket is not None:
             bucket_g.append({"bucket": int(bucket), **rec})
 
@@ -137,11 +140,12 @@ def _dashboard(q):
         "top_hcpcs": top([r for r in hcpcs_g if r["key"] is not None]),
         "top_billing": top([r for r in bill_g if r["key"] is not None]),
         "top_servicing": top([r for r in serv_g if r["key"] is not None]),
+        "top_states": top([r for r in state_g if r["key"] is not None]),
         "hist": bucket_g,
     }
 
 
-SORTABLE = {"month", "hcpcs", "billing_npi", "servicing_npi",
+SORTABLE = {"month", "hcpcs", "billing_npi", "servicing_npi", "billing_state",
             "patients", "claim_lines", "paid"}
 
 
@@ -154,7 +158,8 @@ def table_rows(q):
     limit = min(int(q.get("limit", ["50"])[0]), 500)
     offset = min(int(q.get("offset", ["0"])[0]), 100000)
     sql = f"""
-        SELECT billing_npi, servicing_npi, hcpcs, month, patients, claim_lines, paid
+        SELECT billing_npi, billing_state, servicing_npi, hcpcs, month,
+               patients, claim_lines, paid
         FROM '{PARQUET}' {where}
         ORDER BY {sort} {direction} NULLS LAST
         LIMIT {limit} OFFSET {offset}

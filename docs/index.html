@@ -128,7 +128,7 @@ text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .tscroll{overflow-x:auto;padding:6px 8px 10px}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:7px 12px;text-align:right;white-space:nowrap}
-th:nth-child(-n+4),td:nth-child(-n+4){text-align:left}
+th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}
 td{border-top:1px solid var(--grid);font-variant-numeric:tabular-nums}
 th{color:var(--ink-2);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
 th:hover{color:var(--ink-1)}
@@ -200,6 +200,7 @@ td.null{color:var(--ink-3)}
     <div class="f"><label>From</label><select id="f-from"></select></div>
     <div class="f"><label>To</label><select id="f-to"></select></div>
     <div class="f"><label>HCPCS code(s)</label><input type="text" id="f-hcpcs" placeholder="e.g. T1019, 99213"></div>
+    <div class="f"><label>State</label><select id="f-state"><option value="">All states</option></select></div>
     <button class="btn primary" id="apply">Apply</button>
     <button class="btn ghost" id="reset">Reset</button>
   </div>
@@ -247,7 +248,9 @@ td.null{color:var(--ink-3)}
   by month and HCPCS code. Provider breakdowns are available for the overall view and single-code views;
   the row table shows the 2,000 largest rows by payment. The raw data contains implausibly large payment
   values (single rows in the trillions) — use “Exclude extreme rows” to screen them out of the overall view.
-  Blank NPIs appear as “—”. For full row-level and NPI-level exploration, run the local app in this repo.</p>
+  Blank NPIs appear as “—”. State is the billing provider's NPPES practice-location registration
+  state — an approximation, since national providers bill many states' programs from one
+  registration. For full row-level and NPI-level exploration, run the local app in this repo.</p>
 </main>
 </div>
 
@@ -281,8 +284,8 @@ function unlock(){
 $("pw-go").onclick = tryUnlock;
 $("pw").addEventListener("keydown", e=>{ if (e.key==="Enter") tryUnlock(); });
 
-const state = { month_from:"", month_to:"", hcpcs:"", outliers:"",
-  metric:"paid", sort:6, dir:"desc", page:0 };
+const state = { month_from:"", month_to:"", hcpcs:"", state:"", outliers:"",
+  metric:"paid", sort:7, dir:"desc", page:0 };
 let META = null, DASH = null, seq = 0;
 const DATA = {};   // lazily-fetched static data files
 async function data(name){
@@ -327,7 +330,7 @@ const METRICS = {
 /* ---------- filters / state ---------- */
 function activeFilters(){
   const f = {};
-  for (const k of ["month_from","month_to","hcpcs","outliers"]) if (state[k]) f[k] = state[k];
+  for (const k of ["month_from","month_to","hcpcs","state","outliers"]) if (state[k]) f[k] = state[k];
   return f;
 }
 const qs = f => new URLSearchParams(f).toString();
@@ -338,14 +341,16 @@ function readInputs(){
   state.month_from = $("f-from").value === META.months[0] ? "" : $("f-from").value;
   state.month_to = $("f-to").value === META.months[META.months.length-1] ? "" : $("f-to").value;
   state.hcpcs = $("f-hcpcs").value.trim();
+  state.state = $("f-state").value;
   state.page = 0;
 }
 function writeInputs(){
   $("f-from").value = state.month_from || META.months[0];
   $("f-to").value = state.month_to || META.months[META.months.length-1];
   $("f-hcpcs").value = state.hcpcs;
+  $("f-state").value = state.state;
 }
-const PILL_LABELS = {month_from:"From", month_to:"To", hcpcs:"HCPCS", outliers:"Excluding extreme rows"};
+const PILL_LABELS = {month_from:"From", month_to:"To", hcpcs:"HCPCS", state:"State", outliers:"Excluding extreme rows"};
 function renderPills(){
   const box = $("pills"); box.textContent = "";
   for (const [k,v] of Object.entries(activeFilters())){
@@ -544,58 +549,124 @@ function histChart(box, hist){
 }
 
 /* ---------- static dashboard computation ---------- */
+const sumInto = (map, key, label, paid, pt, cl) => {
+  let r = map.get(key);
+  if (!r) map.set(key, r = {key:label, paid:0, patients:0, claim_lines:0});
+  r.paid += paid; r.patients += pt; r.claim_lines += cl;
+};
+const topOf = map => [...map.values()].sort((a,b)=>b.paid-a.paid).slice(0,12);
+const cvtTops = a => (a||[]).map(([npi,p,pt,cl])=>({key:npi, paid:p, patients:pt, claim_lines:cl}));
+
 async function staticDashboard(){
   const codes = parsedCodes();
-  const noFilters = !state.month_from && !state.month_to && !codes.length;
+  const st = state.state;
+  const noFilters = !state.month_from && !state.month_to && !codes.length && !st;
   if (noFilters && state.outliers) return data("dash_outliers");
   if (noFilters) return data("dash_default");
 
-  const [cube, meta] = await Promise.all([data("cube_month_code"), data("meta")]);
+  const meta = await data("meta");
   const codeIdx = new Map(meta.codes.map((c,i)=>[c,i]));
   const wanted = codes.length ? new Set(codes.map(c=>codeIdx.get(c)).filter(i=>i!=null)) : null;
   const mFrom = state.month_from ? meta.months.indexOf(state.month_from) : 0;
   const mTo = state.month_to ? meta.months.indexOf(state.month_to) : meta.months.length-1;
+  const stIdx = st ? (meta.states||[]).indexOf(st) : -1;
+  const monthFiltered = !!(state.month_from || state.month_to);
+  const d = {summary:{rows:0, paid:0, patients:0, claim_lines:0, hcpcs_n:0,
+                      billing_n:null, servicing_n:null},
+             monthly:[], top_hcpcs:[], top_billing:[], top_servicing:[],
+             top_states:[], hist:[], providerScope:null, histScope:null,
+             trendScope:null, summaryScope:null};
+  if (st && stIdx===-1) return d;
 
-  const summary = {rows:0, paid:0, patients:0, claim_lines:0, billing_n:null, servicing_n:null};
-  const byMonth = new Map(), byCode = new Map();
-  for (const [mi, ci, paid, pt, cl, n] of cube){
-    if (mi<mFrom || mi>mTo) continue;
-    if (wanted && !wanted.has(ci)) continue;
-    summary.rows += n; summary.paid += paid; summary.patients += pt; summary.claim_lines += cl;
-    let mrec = byMonth.get(mi);
-    if (!mrec) byMonth.set(mi, mrec = {month:meta.months[mi], paid:0, patients:0, claim_lines:0});
-    mrec.paid += paid; mrec.patients += pt; mrec.claim_lines += cl;
-    let crec = byCode.get(ci);
-    if (!crec) byCode.set(ci, crec = {key:meta.codes[ci], paid:0, patients:0, claim_lines:0});
-    crec.paid += paid; crec.patients += pt; crec.claim_lines += cl;
+  if (!st){
+    // month/code path — exact for any month range + code set
+    const cube = await data("cube_month_code");
+    const byMonth = new Map(), byCode = new Map();
+    for (const [mi, ci, paid, pt, cl, n] of cube){
+      if (mi<mFrom || mi>mTo) continue;
+      if (wanted && !wanted.has(ci)) continue;
+      d.summary.rows += n; d.summary.paid += paid;
+      d.summary.patients += pt; d.summary.claim_lines += cl;
+      sumInto(byMonth, mi, null, paid, pt, cl);
+      const mrec = byMonth.get(mi); mrec.month = meta.months[mi];
+      sumInto(byCode, ci, meta.codes[ci], paid, pt, cl);
+    }
+    d.summary.hcpcs_n = byCode.size;
+    d.monthly = [...byMonth.values()].sort((a,b)=>a.month<b.month?-1:1);
+    d.top_hcpcs = topOf(byCode);
+    if (codes.length===1 && codeIdx.has(codes[0])){
+      const tops = await data("top_providers");
+      const ci = String(codeIdx.get(codes[0]));
+      d.top_billing = cvtTops(tops.billing[ci]);
+      d.top_servicing = cvtTops(tops.servicing[ci]);
+      d.providerScope = "all months";
+    }
+    // state breakdown for this view (all-months when a month range is set)
+    const sc = await data("cube_state_code");
+    const byState = new Map();
+    for (const [si, ci, paid, pt, cl, n] of sc){
+      if (wanted && !wanted.has(ci)) continue;
+      sumInto(byState, si, meta.states[si], paid, pt, cl);
+    }
+    d.top_states = topOf(byState);
+    d.statesScope = monthFiltered ? "all months" : null;
+    const cb = await data("cube_code_bucket");
+    const byBucket = new Map();
+    for (const [ci, b, paid, n] of cb){
+      if (wanted && !wanted.has(ci)) continue;
+      let rec = byBucket.get(b);
+      if (!rec) byBucket.set(b, rec = {bucket:b, paid:0, n:0});
+      rec.paid += paid; rec.n += n;
+    }
+    d.hist = [...byBucket.values()].sort((a,b)=>a.bucket-b.bucket);
+    d.histScope = monthFiltered ? "all months" : null;
+    return d;
   }
-  summary.hcpcs_n = byCode.size;
-  const monthly = [...byMonth.values()].sort((a,b)=>a.month<b.month?-1:1);
-  const top_hcpcs = [...byCode.values()].sort((a,b)=>b.paid-a.paid).slice(0,12);
 
-  // provider tops only exist pre-baked per single code (all months)
-  let top_billing = [], top_servicing = [], providerScope = null;
-  if (codes.length===1 && codeIdx.has(codes[0])){
-    const tops = await data("top_providers");
-    const ci = String(codeIdx.get(codes[0]));
-    const cvt = a => (a||[]).map(([npi,p,pt,cl])=>({key:npi, paid:p, patients:pt, claim_lines:cl}));
-    top_billing = cvt(tops.billing[ci]);
-    top_servicing = cvt(tops.servicing[ci]);
-    providerScope = "all months";
+  if (!codes.length){
+    // state (+ optional month range) — exact via the month×state cube
+    const ms = await data("cube_month_state");
+    const byMonth = new Map();
+    for (const [mi, si, paid, pt, cl, n] of ms){
+      if (si!==stIdx || mi<mFrom || mi>mTo) continue;
+      d.summary.rows += n; d.summary.paid += paid;
+      d.summary.patients += pt; d.summary.claim_lines += cl;
+      sumInto(byMonth, mi, null, paid, pt, cl);
+      byMonth.get(mi).month = meta.months[mi];
+    }
+    d.monthly = [...byMonth.values()].sort((a,b)=>a.month<b.month?-1:1);
+    const sc = await data("cube_state_code");
+    const byCode = new Map();
+    for (const [si, ci, paid, pt, cl, n] of sc){
+      if (si!==stIdx) continue;
+      sumInto(byCode, ci, meta.codes[ci], paid, pt, cl);
+    }
+    d.summary.hcpcs_n = byCode.size;
+    d.top_hcpcs = topOf(byCode);
+    d.providerScope = "all months";
+    const tops = await data("top_providers_state");
+    d.top_billing = cvtTops(tops.billing[String(stIdx)]);
+    d.top_servicing = cvtTops(tops.servicing[String(stIdx)]);
+    d.histScope = "unavailable";
+    if (monthFiltered) d.summaryScope = null;   // month×state cube is exact
+    return d;
   }
 
-  // histogram cube is code x bucket (no month dimension)
-  const cb = await data("cube_code_bucket");
-  const byBucket = new Map();
-  for (const [ci, b, paid, n] of cb){
-    if (wanted && !wanted.has(ci)) continue;
-    let rec = byBucket.get(b);
-    if (!rec) byBucket.set(b, rec = {bucket:b, paid:0, n:0});
-    rec.paid += paid; rec.n += n;
+  // state + code(s): exact only across all months, via the state×code cube
+  const sc = await data("cube_state_code");
+  const byCode = new Map();
+  for (const [si, ci, paid, pt, cl, n] of sc){
+    if (si!==stIdx || (wanted && !wanted.has(ci))) continue;
+    d.summary.rows += n; d.summary.paid += paid;
+    d.summary.patients += pt; d.summary.claim_lines += cl;
+    sumInto(byCode, ci, meta.codes[ci], paid, pt, cl);
   }
-  const hist = [...byBucket.values()].sort((a,b)=>a.bucket-b.bucket);
-  return {summary, monthly, top_hcpcs, top_billing, top_servicing, hist,
-          providerScope, histScope:(state.month_from||state.month_to) ? "all months" : null};
+  d.summary.hcpcs_n = byCode.size;
+  d.top_hcpcs = topOf(byCode);
+  d.trendScope = "unavailable";
+  d.histScope = "unavailable";
+  d.summaryScope = "all months";
+  return d;
 }
 
 /* ---------- KPI tiles ---------- */
@@ -632,6 +703,9 @@ function renderInsights(d){
   };
   const sum = d.summary;
   if (!sum.rows) return;
+  if (d.summaryScope)
+    add([{t:"Static snapshot: state + code figures cover "},{b:"all months"},
+         {t:" — the date range is not applied to this combination"}]);
   if (d.top_hcpcs.length && sum.paid>0 && !state.hcpcs){
     const t = d.top_hcpcs[0];
     add([{t:"Code "},{b:t.key},{t:" accounts for "},{b:(100*t.paid/sum.paid).toFixed(1)+"%"},
@@ -669,62 +743,82 @@ function renderCharts(d){
   const grid = $("charts"); grid.textContent = "";
   const codes = parsedCodes();
   const fm = METRICS[state.metric];
-  const scope = codes.length ? " · "+codes.join(", ") : state.outliers ? " · extreme rows excluded" : "";
+  const scopeBits = [];
+  if (codes.length) scopeBits.push(codes.join(", "));
+  if (state.state) scopeBits.push(state.state);
+  if (!scopeBits.length && state.outliers) scopeBits.push("extreme rows excluded");
+  const scope = scopeBits.length ? " · "+scopeBits.join(" · ") : "";
   const tcard = card(grid, fm.label+" by month"+scope,
-    codes.length?["Trend re-scoped to your current filters"]:null, true);
-  const tabs = document.createElement("div"); tabs.className = "metric-tabs";
-  for (const [k,mt] of Object.entries(METRICS)){
-    const b = document.createElement("button");
-    b.className = "chip"+(k===state.metric?" on":"");
-    b.textContent = mt.label;
-    b.onclick = () => { state.metric = k; renderCharts(DASH); };
-    tabs.append(b);
+    scopeBits.length?["Trend re-scoped to your current filters"]:null, true);
+  if (d.trendScope==="unavailable"){
+    tcard.c.querySelector(".why").textContent =
+      "The static snapshot can't compute a monthly trend for a state + code combination — clear one of the two to see the trend.";
+  } else {
+    const tabs = document.createElement("div"); tabs.className = "metric-tabs";
+    for (const [k,mt] of Object.entries(METRICS)){
+      const b = document.createElement("button");
+      b.className = "chip"+(k===state.metric?" on":"");
+      b.textContent = mt.label;
+      b.onclick = () => { state.metric = k; renderCharts(DASH); };
+      tabs.append(b);
+    }
+    tcard.c.insertBefore(tabs, tcard.box);
+    lineChart(tcard.box, d.monthly, state.metric);
   }
-  tcard.c.insertBefore(tabs, tcard.box);
-  lineChart(tcard.box, d.monthly, state.metric);
 
   const drillCode = key => { state.hcpcs = String(key); writeInputs(); refresh(); };
+  const drillState = key => { state.state = String(key); writeInputs(); refresh(); };
   const provNote = d.providerScope ? " (top 12, "+d.providerScope+")" : "";
-  if (codes.length===1 && d.top_servicing.length){
-    const a = card(grid, "Top servicing providers · "+codes[0]+provNote,
-      ["Auto-selected because you filtered to ",codes[0]], false);
+  const stScope = state.state ? " · "+state.state : "";
+  if ((codes.length===1 || state.state) && d.top_servicing.length){
+    const who = codes.length===1 ? codes[0] : state.state;
+    const a = card(grid, "Top servicing providers · "+who+provNote,
+      ["Auto-selected because you filtered to ",who], false);
     barChart(a.box, d.top_servicing, {title:"servicing", itemLabel:"NPI"});
-    const b = card(grid, "Top billing providers · "+codes[0]+provNote, null, false);
+    const b = card(grid, "Top billing providers · "+who+provNote, null, false);
     barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
     if (d.top_hcpcs.length>1){
-      const c = card(grid, "Spending by code", null, true);
+      const c = card(grid, "Spending by code"+stScope+(d.providerScope?" (all months)":""), null, true);
       barChart(c.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", onClick:drillCode});
     }
   } else {
-    const a = card(grid, "Top HCPCS codes by spending", null, false);
+    const a = card(grid, "Top HCPCS codes by spending"+stScope, null, false);
     barChart(a.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", onClick:drillCode});
     if (d.top_billing.length){
       const b = card(grid, "Top billing providers", null, false);
       barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
-    } else {
+    } else if (!state.state) {
       const b = card(grid, "Top billing providers", null, false);
       b.c.querySelector(".why").textContent =
-        "Provider breakdowns are pre-computed for the overall view and single-code views — pick one code to see its top providers.";
+        "Provider breakdowns are pre-computed for the overall, single-code, and single-state views — pick one to see its top providers.";
     }
   }
-  const hc = card(grid, "Payment size per row", null, true);
-  hc.c.querySelector(".why").textContent =
-    "Distribution of paid amounts across rows (log-scale buckets"
-    + (d.histScope ? ", "+d.histScope+" — the static snapshot can't slice this by date" : "")
-    + "). Hover for counts.";
-  histChart(hc.box, d.hist);
+  if (!state.state && d.top_states && d.top_states.length){
+    const sc = card(grid, "Spending by state"+(d.statesScope?" (all months)":""),
+      ["Billing provider's NPPES registration state — not necessarily the paying state's program"], false);
+    barChart(sc.box, d.top_states, {title:"states", itemLabel:"State", onClick:drillState});
+  }
+  if (d.histScope!=="unavailable"){
+    const hc = card(grid, "Payment size per row", null, true);
+    hc.c.querySelector(".why").textContent =
+      "Distribution of paid amounts across rows (log-scale buckets"
+      + (d.histScope ? ", "+d.histScope+" — the static snapshot can't slice this by date" : "")
+      + "). Hover for counts.";
+    histChart(hc.box, d.hist);
+  }
 }
 
 /* ---------- table (top-2000 rows sample) ---------- */
-const COLS = ["Billing NPI","Servicing NPI","HCPCS","Month","Patients","Claim lines","Paid"];
+const COLS = ["Billing NPI","State","Servicing NPI","HCPCS","Month","Patients","Claim lines","Paid"];
 const PAGE = 25;
 async function loadRows(){
   const all = await data("top_rows");
   const codes = new Set(parsedCodes());
   const rows = all.filter(r =>
-    (!codes.size || codes.has((r[2]||"").toUpperCase())) &&
-    (!state.month_from || r[3]>=state.month_from) &&
-    (!state.month_to || r[3]<=state.month_to));
+    (!codes.size || codes.has((r[3]||"").toUpperCase())) &&
+    (!state.state || r[1]===state.state) &&
+    (!state.month_from || r[4]>=state.month_from) &&
+    (!state.month_to || r[4]<=state.month_to));
   const si = state.sort, dir = state.dir==="asc"?1:-1;
   rows.sort((a,b)=>{
     const x=a[si], y=b[si];
@@ -756,8 +850,8 @@ async function loadRows(){
     row.forEach((v,i)=>{
       const td = document.createElement("td");
       if (v===null||v===""){ td.textContent = "—"; td.className = "null"; }
-      else if (i===6) td.textContent = fmtFull(+v);
-      else if (i===4||i===5) td.textContent = (+v).toLocaleString();
+      else if (i===7) td.textContent = fmtFull(+v);
+      else if (i===5||i===6) td.textContent = (+v).toLocaleString();
       else td.textContent = v;
       tr.append(td);
     });
@@ -804,7 +898,7 @@ function setupPresets(){
     ["Last 12 mo", ()=>{ state.month_from = months[Math.max(0,months.length-12)]; state.month_to=""; }],
     ["2024", ()=>{ state.month_from="2024-01"; state.month_to="2024-12"; }],
     ["Exclude extreme rows", ()=>{
-      state.month_from=""; state.month_to=""; state.hcpcs=""; state.outliers="1"; }],
+      state.month_from=""; state.month_to=""; state.hcpcs=""; state.state=""; state.outliers="1"; }],
   ];
   const box = $("presets");
   for (const [label,fn] of presets){
@@ -826,6 +920,10 @@ async function init(){
       const o = document.createElement("option"); o.value = mth; o.textContent = fmtMonth(mth);
       s.append(o);
     }
+  }
+  for (const st of (META.states||[])){
+    const o = document.createElement("option"); o.value = st; o.textContent = st;
+    $("f-state").append(o);
   }
   setupPresets();
   const hash = new URLSearchParams(location.hash.slice(1));

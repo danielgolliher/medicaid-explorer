@@ -29,9 +29,21 @@ Only needed if the source CSV changes:
 
 ```bash
 .venv/bin/python convert.py            # CSV -> data/spending.parquet + stats.json
-.venv/bin/python -c "import json, server; json.dump(server._dashboard({}), open('data/default_dashboard.json','w'))"
-rm -f data/cache/*.json                # drop stale preset caches
+.venv/bin/python add_state.py          # join billing NPI -> NPPES state, rebake defaults
+.venv/bin/python bake_static.py        # regenerate docs/data for the Pages build
 ```
+
+`add_state.py` expects the NPPES bulk file at `data/nppes.zip`
+(https://download.cms.gov/nppes/NPI_Files.html); it keeps the extracted
+NPI→state mapping in `data/npi_state.parquet` for reuse.
+
+## State dimension
+
+There is no state column in the source data. `billing_state` is the billing
+provider's NPPES practice-location registration state (96% row coverage) — an
+approximation, since national providers bill many states' programs from one
+registration. The UI labels it accordingly. Rows with blank billing NPIs
+(including the extreme-outlier rows) have no state.
 
 ## How it works
 

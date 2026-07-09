@@ -114,7 +114,7 @@ text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .tscroll{overflow-x:auto;padding:6px 8px 10px}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:7px 12px;text-align:right;white-space:nowrap}
-th:nth-child(-n+4),td:nth-child(-n+4){text-align:left}
+th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}
 td{border-top:1px solid var(--grid);font-variant-numeric:tabular-nums}
 th{color:var(--ink-2);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
 th:hover{color:var(--ink-1)}
@@ -152,6 +152,7 @@ td.null{color:var(--ink-3)}
     <div class="f"><label>HCPCS code(s)</label><input type="text" id="f-hcpcs" placeholder="e.g. T1019, 99213"></div>
     <div class="f"><label>Billing NPI</label><input type="text" id="f-billing" placeholder="10-digit NPI"></div>
     <div class="f"><label>Servicing NPI</label><input type="text" id="f-servicing" placeholder="10-digit NPI"></div>
+    <div class="f"><label>State</label><select id="f-state"><option value="">All states</option></select></div>
     <div class="f"><label>Paid / row ≥</label><input type="text" class="money" id="f-min" placeholder="$ min"></div>
     <div class="f"><label>Paid / row ≤</label><input type="text" class="money" id="f-max" placeholder="$ max"></div>
     <button class="btn primary" id="apply">Apply</button>
@@ -183,7 +184,9 @@ td.null{color:var(--ink-3)}
 
   <p class="note">Source: medicaid-provider-spending.csv (238M rows, 2018–2024). Note: the raw data
   contains a handful of implausibly large payment values (single rows in the trillions) — use the
-  “Exclude extreme rows” preset or a Paid ≤ filter to screen them out. Blank NPIs appear as “—”.</p>
+  “Exclude extreme rows” preset or a Paid ≤ filter to screen them out. Blank NPIs appear as “—”. State is the billing provider's NPPES practice-location
+  registration state — an approximation, since national providers bill many states' programs
+  from one registration.</p>
 </main>
 
 <div class="tooltip" id="tooltip"></div>
@@ -192,7 +195,7 @@ td.null{color:var(--ink-3)}
 "use strict";
 const $ = id => document.getElementById(id);
 const state = {
-  month_from:"", month_to:"", hcpcs:"", billing_npi:"", servicing_npi:"",
+  month_from:"", month_to:"", hcpcs:"", billing_npi:"", servicing_npi:"", state:"",
   paid_min:"", paid_max:"",
   metric:"paid", sort:"paid", dir:"desc", page:0,
 };
@@ -231,7 +234,7 @@ const METRICS = {
 /* ---------- filters / state ---------- */
 function activeFilters(){
   const f = {};
-  for (const k of ["month_from","month_to","hcpcs","billing_npi","servicing_npi","paid_min","paid_max"])
+  for (const k of ["month_from","month_to","hcpcs","billing_npi","servicing_npi","state","paid_min","paid_max"])
     if (state[k]) f[k] = state[k];
   return f;
 }
@@ -243,6 +246,7 @@ function readInputs(){
   state.hcpcs = $("f-hcpcs").value.trim();
   state.billing_npi = $("f-billing").value.trim();
   state.servicing_npi = $("f-servicing").value.trim();
+  state.state = $("f-state").value;
   state.paid_min = $("f-min").value.trim().replace(/[$,]/g,"");
   state.paid_max = $("f-max").value.trim().replace(/[$,]/g,"");
   state.page = 0;
@@ -253,12 +257,14 @@ function writeInputs(){
   $("f-hcpcs").value = state.hcpcs;
   $("f-billing").value = state.billing_npi;
   $("f-servicing").value = state.servicing_npi;
+  $("f-state").value = state.state;
   $("f-min").value = state.paid_min;
   $("f-max").value = state.paid_max;
 }
 
 const PILL_LABELS = {month_from:"From", month_to:"To", hcpcs:"HCPCS",
-  billing_npi:"Billing NPI", servicing_npi:"Servicing NPI", paid_min:"Paid ≥", paid_max:"Paid ≤"};
+  billing_npi:"Billing NPI", servicing_npi:"Servicing NPI", state:"State",
+  paid_min:"Paid ≥", paid_max:"Paid ≤"};
 function renderPills(){
   const box = $("pills"); box.textContent = "";
   for (const [k,v] of Object.entries(activeFilters())){
@@ -555,7 +561,8 @@ function renderCharts(d){
   const fm = METRICS[state.metric];
   const scope = state.hcpcs ? " · "+state.hcpcs.toUpperCase()
     : state.billing_npi ? " · NPI "+state.billing_npi
-    : state.servicing_npi ? " · NPI "+state.servicing_npi : "";
+    : state.servicing_npi ? " · NPI "+state.servicing_npi
+    : state.state ? " · "+state.state : "";
   const tcard = card(grid, fm.label+" by month"+scope,
     scope?["Trend re-scoped to your current filters"]:null, true);
   const tabs = document.createElement("div"); tabs.className = "metric-tabs";
@@ -569,7 +576,12 @@ function renderCharts(d){
   tcard.c.insertBefore(tabs, tcard.box);
   lineChart(tcard.box, d.monthly, state.metric);
   // adaptive top-N bars
-  for (const p of chartPlan()){
+  const plans = chartPlan();
+  if (!state.state && d.top_states && d.top_states.length)
+    plans.push({data:"top_states", title:"Spending by state",
+      why:["Billing provider's NPPES registration state — not necessarily the paying state's program"],
+      itemLabel:"State", drill:"state"});
+  for (const p of plans){
     const bc = card(grid, p.title, p.why, false);
     barChart(bc.box, d[p.data], {title:p.title, itemLabel:p.itemLabel,
       onClick:key=>{ if (key==null) return;
@@ -583,8 +595,8 @@ function renderCharts(d){
 
 /* ---------- table ---------- */
 const COLS = [
-  ["billing_npi","Billing NPI"],["servicing_npi","Servicing NPI"],
-  ["hcpcs","HCPCS"],["month","Month"],
+  ["billing_npi","Billing NPI"],["billing_state","State"],
+  ["servicing_npi","Servicing NPI"],["hcpcs","HCPCS"],["month","Month"],
   ["patients","Patients"],["claim_lines","Claim lines"],["paid","Paid"],
 ];
 const PAGE = 25;
@@ -685,6 +697,10 @@ async function init(){
       const o = document.createElement("option"); o.value = mth; o.textContent = fmtMonth(mth);
       s.append(o);
     }
+  }
+  for (const st of (META.states||[])){
+    const o = document.createElement("option"); o.value = st; o.textContent = st;
+    $("f-state").append(o);
   }
   setupPresets();
   const hash = new URLSearchParams(location.hash.slice(1));

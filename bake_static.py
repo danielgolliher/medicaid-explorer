@@ -23,8 +23,12 @@ codes = [r[0] for r in con.execute(
     f"SELECT DISTINCT hcpcs FROM '{P}' WHERE hcpcs IS NOT NULL ORDER BY hcpcs").fetchall()]
 months = [r[0] for r in con.execute(
     f"SELECT DISTINCT month FROM '{P}' WHERE month IS NOT NULL ORDER BY month").fetchall()]
+states = [r[0] for r in con.execute(
+    f"SELECT DISTINCT billing_state FROM '{P}' WHERE billing_state IS NOT NULL "
+    "AND len(billing_state)=2 ORDER BY 1").fetchall()]
 code_idx = {c: i for i, c in enumerate(codes)}
 month_idx = {m: i for i, m in enumerate(months)}
+state_idx = {s: i for i, s in enumerate(states)}
 
 print("cube month x code ...")
 rows = con.execute(f"""
@@ -45,6 +49,49 @@ rows = con.execute(f"""
 """).fetchall()
 with open(os.path.join(OUT, "cube_code_bucket.json"), "w") as f:
     json.dump([[code_idx[c], b, p, n] for c, b, p, n in rows], f, separators=(",", ":"))
+
+print("cube month x state ...")
+rows = con.execute(f"""
+    SELECT month, billing_state, round(sum(paid),2), sum(patients), sum(claim_lines), count(*)
+    FROM '{P}' WHERE month IS NOT NULL AND billing_state IS NOT NULL AND len(billing_state)=2
+    GROUP BY 1, 2
+""").fetchall()
+with open(os.path.join(OUT, "cube_month_state.json"), "w") as f:
+    json.dump([[month_idx[m], state_idx[s], p, pt, cl, n] for m, s, p, pt, cl, n in rows],
+              f, separators=(",", ":"))
+print("  rows:", len(rows))
+
+print("cube state x code ...")
+rows = con.execute(f"""
+    SELECT billing_state, hcpcs, round(sum(paid),2), sum(patients), sum(claim_lines), count(*)
+    FROM '{P}' WHERE hcpcs IS NOT NULL AND billing_state IS NOT NULL AND len(billing_state)=2
+    GROUP BY 1, 2
+""").fetchall()
+with open(os.path.join(OUT, "cube_state_code.json"), "w") as f:
+    json.dump([[state_idx[s], code_idx[c], p, pt, cl, n] for s, c, p, pt, cl, n in rows],
+              f, separators=(",", ":"))
+print("  rows:", len(rows))
+
+print("top providers per state ...")
+tops_state = {}
+for col, key in (("billing_npi", "billing"), ("servicing_npi", "servicing")):
+    rows = con.execute(f"""
+        WITH g AS (
+            SELECT billing_state AS st, {col} AS npi, round(sum(paid),2) AS paid,
+                   sum(patients) AS patients, sum(claim_lines) AS claim_lines,
+                   row_number() OVER (PARTITION BY billing_state ORDER BY sum(paid) DESC) AS rk
+            FROM '{P}'
+            WHERE billing_state IS NOT NULL AND len(billing_state)=2 AND {col} IS NOT NULL
+            GROUP BY billing_state, {col}
+        )
+        SELECT st, npi, paid, patients, claim_lines FROM g WHERE rk <= 12
+    """).fetchall()
+    per_state = {}
+    for s, npi, p, pt, cl in rows:
+        per_state.setdefault(state_idx[s], []).append([npi, p, pt, cl])
+    tops_state[key] = per_state
+with open(os.path.join(OUT, "top_providers_state.json"), "w") as f:
+    json.dump(tops_state, f, separators=(",", ":"))
 
 print("top providers per code ...")
 tops = {}
@@ -69,7 +116,7 @@ with open(os.path.join(OUT, "top_providers.json"), "w") as f:
 
 print("top rows sample ...")
 rows = con.execute(f"""
-    SELECT billing_npi, servicing_npi, hcpcs, month, patients, claim_lines, paid
+    SELECT billing_npi, billing_state, servicing_npi, hcpcs, month, patients, claim_lines, paid
     FROM '{P}' ORDER BY paid DESC LIMIT 2000
 """).fetchall()
 with open(os.path.join(OUT, "top_rows.json"), "w") as f:
@@ -78,6 +125,7 @@ with open(os.path.join(OUT, "top_rows.json"), "w") as f:
 with open(os.path.join(HERE, "data", "stats.json")) as f:
     stats = json.load(f)
 stats["codes"] = codes
+stats["states"] = states
 with open(os.path.join(OUT, "meta.json"), "w") as f:
     json.dump(stats, f, separators=(",", ":"))
 
