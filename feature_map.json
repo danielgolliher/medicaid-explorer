@@ -1,7 +1,32 @@
 {
   "7ff1c15f-43fb-4e25-8cf7-7b8989e4134d": {
     "feature": "State filter (billing provider NPPES state)",
-    "commits": ["6f12aee"],
+    "commits": [
+      "6f12aee"
+    ],
     "notes": "git revert of these commits rolls the feature back; docs/data cube files revert with them. data/spending.parquet keeps the billing_state column harmlessly."
+  },
+  "ca3671b6-d7f2-466b-9f5d-dee358273b96": {
+    "feature": "Provider names next to NPIs (servicing charts)",
+    "commits": [
+      "24b9db0",
+      "d86abc7"
+    ],
+    "notes": "d86abc7 also carries the code-descriptions feature; rolling back names alone requires reverting both and re-applying descriptions (or manual strip)."
+  },
+  "c603f63d-e3fe-414a-bacc-34c64a2af7d3": {
+    "feature": "Provider names next to NPIs (billing charts)",
+    "commits": [
+      "24b9db0",
+      "d86abc7"
+    ],
+    "notes": "Same feature/commits as the servicing-names request."
+  },
+  "6bf6068d-a5a6-4e94-8caa-edbec52e91e0": {
+    "feature": "HCPCS code descriptions on code charts",
+    "commits": [
+      "d86abc7"
+    ],
+    "notes": "d86abc7 also carries docs provider-name rendering; see names entries."
   }
 }
