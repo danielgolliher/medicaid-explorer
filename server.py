@@ -25,6 +25,14 @@ con_lock = threading.Lock()
 
 TOP_N = 12
 
+# HCPCS Level II short descriptions (CMS, public domain). CPT/CDT codes are
+# absent — their descriptions are AMA/ADA-licensed and can't be republished.
+HCPCS_DESC = {}
+_desc_path = os.path.join(HERE, "data", "hcpcs_desc.json")
+if os.path.exists(_desc_path):
+    with open(_desc_path) as f:
+        HCPCS_DESC = json.load(f)
+
 # Dashboard results are cached per filter combination. Results that took a
 # full scan (>3s) also persist to disk so they stay warm across restarts;
 # the unfiltered landing-page result is precomputed the same way.
@@ -150,7 +158,8 @@ def _dashboard(q):
     return {
         "summary": summary,
         "monthly": monthly,
-        "top_hcpcs": top([r for r in hcpcs_g if r["key"] is not None]),
+        "top_hcpcs": [{**r, "name": HCPCS_DESC.get(r["key"])}
+                      for r in top([r for r in hcpcs_g if r["key"] is not None])],
         "top_billing": with_names(top([r for r in bill_g if r["key"] is not None])),
         "top_servicing": with_names(top([r for r in serv_g if r["key"] is not None])),
         "top_states": top([r for r in state_g if r["key"] is not None]),

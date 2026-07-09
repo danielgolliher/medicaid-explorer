@@ -471,7 +471,8 @@ const SEQ = ["--seq-650","--seq-600","--seq-550","--seq-500","--seq-450",
              "--seq-400","--seq-350","--seq-300","--seq-250","--seq-250","--seq-250","--seq-250"];
 function barChart(box, items, opts){
   box.textContent = "";
-  const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:118};
+  const hasNames = items.some(d=>d.name);
+  const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:hasNames?180:118};
   const W=560, H=m.t+m.b+rows*rowH;
   const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":opts.title},box);
   if (!rows) return;
@@ -482,8 +483,20 @@ function barChart(box, items, opts){
     const bw = Math.max(2,(d.paid/maxV)*iw);
     const color = css(SEQ[Math.min(i,SEQ.length-1)]);
     const label = d.key===null||d.key===undefined||d.key==="" ? "—" : String(d.key);
-    el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
-      .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+    if (d.name && opts.keyFirst){
+      el("text",{x:m.l-9,y:y+bh/2-1,"text-anchor":"end","font-size":11,"font-weight":600,fill:css("--ink-1")},svg)
+        .textContent = label.length>16 ? label.slice(0,15)+"…" : label;
+      el("text",{x:m.l-9,y:y+bh/2+10,"text-anchor":"end","font-size":9,fill:css("--ink-3")},svg)
+        .textContent = d.name.length>30 ? d.name.slice(0,29)+"…" : d.name;
+    } else if (d.name){
+      el("text",{x:m.l-9,y:y+bh/2-1,"text-anchor":"end","font-size":10.5,fill:css("--ink-1")},svg)
+        .textContent = d.name.length>28 ? d.name.slice(0,27)+"…" : d.name;
+      el("text",{x:m.l-9,y:y+bh/2+10,"text-anchor":"end","font-size":9,fill:css("--ink-3"),
+        "font-variant-numeric":"tabular-nums"},svg).textContent = label;
+    } else {
+      el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
+        .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+    }
     el("path",{d:`M${m.l},${y}h${Math.max(0,bw-4)}a4,4 0 0 1 4,4v${bh-8}a4,4 0 0 1 -4,4h${-Math.max(0,bw-4)}z`,
       fill:color},svg);
     el("text",{x:m.l+bw+7,y:y+bh/2+4,"font-size":11,"font-weight":600,fill:css("--ink-2"),
@@ -499,7 +512,7 @@ function barChart(box, items, opts){
     ];
     if (canDrill) ttRows.push({value:"Click to filter to this "+opts.itemLabel.toLowerCase(), label:""});
     const tip = ev => showTip(ev.clientX ?? innerWidth/2, ev.clientY ?? innerHeight/2,
-      opts.itemLabel+" "+label, ttRows);
+      opts.itemLabel+" "+label+(d.name?" — "+d.name:""), ttRows);
     hit.addEventListener("pointermove",tip);
     hit.addEventListener("focus",tip);
     hit.addEventListener("pointerleave",hideTip);
@@ -563,14 +576,19 @@ const sumInto = (map, key, label, paid, pt, cl) => {
   r.paid += paid; r.patients += pt; r.claim_lines += cl;
 };
 const topOf = map => [...map.values()].sort((a,b)=>b.paid-a.paid).slice(0,12);
-const cvtTops = a => (a||[]).map(([npi,p,pt,cl])=>({key:npi, paid:p, patients:pt, claim_lines:cl}));
+const cvtTops = a => (a||[]).map(([npi,p,pt,cl,nm])=>({key:npi, paid:p, patients:pt, claim_lines:cl, name:nm}));
 
+async function withDesc(d){
+  const desc = await data("hcpcs_desc");
+  for (const r of d.top_hcpcs || []) if (r.name===undefined) r.name = desc[r.key] || null;
+  return d;
+}
 async function staticDashboard(){
   const codes = parsedCodes();
   const st = state.state;
   const noFilters = !state.month_from && !state.month_to && !codes.length && !st;
-  if (noFilters && state.outliers) return data("dash_outliers");
-  if (noFilters) return data("dash_default");
+  if (noFilters && state.outliers) return withDesc(await data("dash_outliers"));
+  if (noFilters) return withDesc(await data("dash_default"));
 
   const meta = await data("meta");
   const codeIdx = new Map(meta.codes.map((c,i)=>[c,i]));
@@ -628,7 +646,7 @@ async function staticDashboard(){
     }
     d.hist = [...byBucket.values()].sort((a,b)=>a.bucket-b.bucket);
     d.histScope = monthFiltered ? "all months" : null;
-    return d;
+    return withDesc(d);
   }
 
   if (!codes.length){
@@ -657,7 +675,7 @@ async function staticDashboard(){
     d.top_servicing = cvtTops(tops.servicing[String(stIdx)]);
     d.histScope = "unavailable";
     if (monthFiltered) d.summaryScope = null;   // month×state cube is exact
-    return d;
+    return withDesc(d);
   }
 
   // state + code(s): exact only across all months, via the state×code cube
@@ -674,7 +692,7 @@ async function staticDashboard(){
   d.trendScope = "unavailable";
   d.histScope = "unavailable";
   d.summaryScope = "all months";
-  return d;
+  return withDesc(d);
 }
 
 /* ---------- KPI tiles ---------- */
@@ -786,12 +804,14 @@ function renderCharts(d){
     const b = card(grid, "Top billing providers · "+who+provNote, null, false);
     barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
     if (d.top_hcpcs.length>1){
-      const c = card(grid, "Spending by code"+stScope+(d.providerScope?" (all months)":""), null, true);
-      barChart(c.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", onClick:drillCode});
+      const c = card(grid, "Spending by code"+stScope+(d.providerScope?" (all months)":""),
+        ["Descriptions: CMS HCPCS Level II; CPT/CDT codes show none (AMA/ADA licensing)"], true);
+      barChart(c.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", keyFirst:true, onClick:drillCode});
     }
   } else {
-    const a = card(grid, "Top HCPCS codes by spending"+stScope, null, false);
-    barChart(a.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", onClick:drillCode});
+    const a = card(grid, "Top HCPCS codes by spending"+stScope,
+      ["Descriptions: CMS HCPCS Level II; CPT/CDT codes show none (AMA/ADA licensing)"], false);
+    barChart(a.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", keyFirst:true, onClick:drillCode});
     if (d.top_billing.length){
       const b = card(grid, "Top billing providers", null, false);
       barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
