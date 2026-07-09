@@ -853,7 +853,7 @@ if (sessionStorage.getItem("mps-unlocked")==="1") unlock();
    back to device-local localStorage. */
 (function(){
   "use strict";
-  const COMMENTS_ENDPOINT = null;
+  const COMMENTS_ENDPOINT = "https://mi-mythos-comments.danielgolliher.workers.dev/api/comments";
   const PAGE_KEY = (location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")) || "/";
   const STORAGE_KEY = "mps-suggestions:" + PAGE_KEY;
   const USER_KEY = "mps-user";
