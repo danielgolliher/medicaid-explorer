@@ -136,6 +136,30 @@ th .arrow{font-size:10px}
 tbody tr:hover{background:var(--ghost)}
 td.null{color:var(--ink-3)}
 
+/* suggestions */
+.suggest{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;
+  margin-top:14px;padding:16px 18px}
+.suggest h3{margin:0;font-size:14.5px}
+.suggest .sub{font-size:12px;color:var(--ink-3);margin:3px 0 12px}
+.suggest .who{font-size:12.5px;color:var(--ink-2);margin-bottom:10px}
+.suggest .who b{font-weight:600}
+.suggest-form{display:flex;flex-direction:column;gap:8px;max-width:640px}
+.suggest-form input,.suggest-form textarea{font:inherit;color:var(--ink-1);background:var(--page);
+  border:1px solid var(--border);border-radius:8px;padding:8px 10px;width:100%}
+.suggest-form input{max-width:240px}
+.suggest-form textarea{min-height:70px;resize:vertical}
+.suggest-form input:focus,.suggest-form textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.suggest-form .row{display:flex;gap:8px;align-items:center}
+#sg-status{font-size:12px;color:var(--ink-3)}
+.sg-list{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.sg-item{border:1px solid var(--border);border-radius:10px;padding:10px 13px}
+.sg-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+.sg-badge{display:inline-block;padding:1px 9px;border-radius:99px;font-weight:600;font-size:11.5px}
+.sg-del{all:unset;cursor:pointer;margin-left:auto;color:var(--ink-3);font-size:12px;padding:2px 6px;border-radius:6px}
+.sg-del:hover{background:var(--ghost);color:var(--ink-1)}
+.sg-body{margin-top:6px;font-size:13.5px;white-space:pre-wrap;overflow-wrap:break-word}
+.sg-none{font-size:12.5px;color:var(--ink-3);margin-top:12px}
+
 .empty{display:none;text-align:center;padding:44px 0 30px}
 .empty img{width:280px;max-width:80%}
 .empty p{color:var(--ink-2);margin:10px 0 0}
@@ -196,6 +220,22 @@ td.null{color:var(--ink-3)}
       </div>
       <div class="tscroll"><table id="table"></table></div>
     </div>
+  </div>
+
+  <div class="suggest" id="suggest">
+    <h3>Suggestions</h3>
+    <p class="sub">What would you like added to this explorer? Comments are shared with all visitors.</p>
+    <p class="who">Posting as <b id="sg-who">…</b></p>
+    <div class="suggest-form">
+      <input type="text" id="sg-name" placeholder="Your name" maxlength="40" autocomplete="name">
+      <textarea id="sg-body" placeholder="I'd like to see…" maxlength="5000"></textarea>
+      <div class="row">
+        <button class="btn primary" id="sg-post">Post suggestion</button>
+        <span id="sg-status"></span>
+      </div>
+    </div>
+    <div class="sg-list" id="sg-list"></div>
+    <p class="sg-none" id="sg-none" style="display:none">No suggestions yet — be the first.</p>
   </div>
 
   <div class="empty" id="empty">
@@ -803,6 +843,181 @@ async function init(){
 }
 
 if (sessionStorage.getItem("mps-unlocked")==="1") unlock();
+</script>
+
+<script>
+/* ===== Suggestions — same mechanism as the MI Mythos briefs' comments =====
+   Shared, cross-device storage via the Cloudflare Worker in
+   mi-mythos/comments-backend (page-keyed KV, IP-derived identity, server-
+   enforced deletes). When COMMENTS_ENDPOINT is null or unreachable, falls
+   back to device-local localStorage. */
+(function(){
+  "use strict";
+  const COMMENTS_ENDPOINT = null;
+  const PAGE_KEY = (location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")) || "/";
+  const STORAGE_KEY = "mps-suggestions:" + PAGE_KEY;
+  const USER_KEY = "mps-user";
+  const SERVER_ID_KEY = "mps-server-id:" + PAGE_KEY;
+  const $ = id => document.getElementById(id);
+
+  function getUser(){
+    let u = null;
+    try { u = JSON.parse(localStorage.getItem(USER_KEY) || "null"); } catch(e){}
+    if (!u || !u.id){
+      const uuid = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+      const id = uuid.replace(/-/g,"").slice(0,8).toUpperCase();
+      let h = 0;
+      for (let i=0;i<uuid.length;i++) h = (h*31 + uuid.charCodeAt(i)) % 360;
+      u = { id, defaultLabel:"Commenter "+id.slice(0,4), name:null,
+            color:"hsl("+h+", 65%, 45%)", bgColor:"hsla("+h+", 70%, 55%, 0.28)" };
+    }
+    if (!u.defaultLabel) u.defaultLabel = u.label || ("Commenter "+(u.id||"").slice(0,4));
+    if (u.name === undefined) u.name = null;
+    u.label = u.name || u.defaultLabel;
+    try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch(e){}
+    return u;
+  }
+
+  async function setUserName(rawName){
+    const trimmed = (rawName || "").trim().slice(0,40);
+    const u = getUser();
+    if ((trimmed || null) === u.name) return u;
+    u.name = trimmed || null;
+    u.label = u.name || u.defaultLabel;
+    try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch(e){}
+    let list;
+    try { list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch(e){ list = []; }
+    let changed = false;
+    for (const c of list){
+      if (c.author && c.author.id === u.id){
+        c.author.name = u.name; c.author.label = u.label; changed = true;
+      }
+    }
+    if (changed){ try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch(e){} }
+    if (COMMENTS_ENDPOINT){
+      try {
+        const userEndpoint = COMMENTS_ENDPOINT.replace(/\/api\/comments\/?$/, "/api/user");
+        await fetch(userEndpoint, { method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ path: PAGE_KEY, name: u.name }) });
+      } catch(e){ console.warn("user-name sync failed", e); }
+    }
+    return u;
+  }
+
+  async function loadComments(){
+    if (COMMENTS_ENDPOINT){
+      try {
+        const r = await fetch(COMMENTS_ENDPOINT + "?path=" + encodeURIComponent(PAGE_KEY));
+        if (r.ok) return await r.json();
+      } catch(e){ console.warn("comments backend unavailable, using localStorage", e); }
+    }
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch(e){ return []; }
+  }
+
+  async function saveComment(c){
+    let list;
+    try { list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch(e){ list = []; }
+    list.push(c);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch(e){}
+    if (COMMENTS_ENDPOINT){
+      try {
+        const r = await fetch(COMMENTS_ENDPOINT, { method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ path: PAGE_KEY, comment: c }) });
+        const out = await r.json();
+        if (out && out.comment && out.comment.author)
+          try { localStorage.setItem(SERVER_ID_KEY, out.comment.author.id); } catch(e){}
+      } catch(e){ console.warn("comments backend POST failed", e); }
+    }
+  }
+
+  async function deleteComment(id){
+    let list;
+    try { list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch(e){ list = []; }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list.filter(c=>c.id!==id))); } catch(e){}
+    if (COMMENTS_ENDPOINT){
+      try {
+        await fetch(COMMENTS_ENDPOINT + "?path=" + encodeURIComponent(PAGE_KEY)
+          + "&id=" + encodeURIComponent(id), { method:"DELETE" });
+      } catch(e){ console.warn("comments backend DELETE failed", e); }
+    }
+  }
+
+  function myIds(){
+    const ids = new Set([getUser().id]);
+    const sid = localStorage.getItem(SERVER_ID_KEY);
+    if (sid) ids.add(sid);
+    return ids;
+  }
+
+  function renderWho(){
+    const u = getUser();
+    $("sg-who").textContent = u.label;
+    $("sg-who").style.color = u.color;
+    if (u.name) $("sg-name").value = u.name;
+  }
+
+  async function renderList(){
+    const list = await loadComments();
+    const mine = myIds();
+    const box = $("sg-list"); box.textContent = "";
+    $("sg-none").style.display = list.length ? "none" : "block";
+    for (const c of [...list].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))){
+      const item = document.createElement("div"); item.className = "sg-item";
+      const head = document.createElement("div"); head.className = "sg-head";
+      const badge = document.createElement("span"); badge.className = "sg-badge";
+      badge.textContent = (c.author && c.author.label) || "Commenter";
+      if (c.author){ badge.style.background = c.author.bgColor || "var(--wash)";
+                     badge.style.color = c.author.color || "var(--ink-1)"; }
+      head.append(badge);
+      if (c.createdAt){
+        const when = document.createElement("span");
+        when.textContent = new Date(c.createdAt).toLocaleDateString(undefined,
+          { month:"short", day:"numeric", year:"numeric" });
+        head.append(when);
+      }
+      if (c.author && mine.has(c.author.id)){
+        const del = document.createElement("button"); del.className = "sg-del";
+        del.textContent = "Delete"; del.title = "Delete your suggestion";
+        del.onclick = async ()=>{ await deleteComment(c.id); renderList(); };
+        head.append(del);
+      }
+      const body = document.createElement("div"); body.className = "sg-body";
+      body.textContent = c.body || "";
+      item.append(head, body); box.append(item);
+    }
+  }
+
+  async function post(){
+    const bodyText = $("sg-body").value.trim();
+    if (!bodyText){ $("sg-status").textContent = "Write a suggestion first."; return; }
+    $("sg-post").disabled = true;
+    $("sg-status").textContent = "Posting…";
+    try {
+      const u = await setUserName($("sg-name").value);
+      await saveComment({
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random().toString(36).slice(2),
+        anchor: { sectionId:"suggestions", prefix:"", exact:"", suffix:"" },
+        body: bodyText.slice(0,5000),
+        author: u,
+        createdAt: Date.now(),
+      });
+      $("sg-body").value = "";
+      $("sg-status").textContent = COMMENTS_ENDPOINT ? "Posted — visible to everyone."
+        : "Posted (saved on this device).";
+      renderWho();
+      await renderList();
+    } finally {
+      $("sg-post").disabled = false;
+      setTimeout(()=>{ $("sg-status").textContent = ""; }, 4000);
+    }
+  }
+
+  $("sg-post").addEventListener("click", post);
+  renderWho();
+  renderList();
+})();
 </script>
 </body>
 </html>
