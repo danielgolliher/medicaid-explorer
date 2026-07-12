@@ -28,5 +28,12 @@
       "d86abc7"
     ],
     "notes": "d86abc7 also carries docs provider-name rendering; see names entries."
+  },
+  "fe8bca50-a2c5-4c10-ac6d-ad87793c51ee": {
+    "feature": "Spending-by-sector breakdown (code-family classification)",
+    "commits": [
+      "0d9add2"
+    ],
+    "notes": "Revert 0d9add2 to roll back; sectors.json + build_sectors.py go with it."
   }
 }
