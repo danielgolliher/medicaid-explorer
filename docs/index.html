@@ -471,7 +471,7 @@ const SEQ = ["--seq-650","--seq-600","--seq-550","--seq-500","--seq-450",
              "--seq-400","--seq-350","--seq-300","--seq-250","--seq-250","--seq-250","--seq-250"];
 function barChart(box, items, opts){
   box.textContent = "";
-  const hasNames = items.some(d=>d.name);
+  const hasNames = items.some(d=>d.name) || !!opts.wideLabels;
   const rows = items.length, rowH = 26, m={t:6,r:70,b:22,l:hasNames?180:118};
   const W=560, H=m.t+m.b+rows*rowH;
   const svg = el("svg",{viewBox:`0 0 ${W} ${H}`,"aria-label":opts.title},box);
@@ -494,8 +494,9 @@ function barChart(box, items, opts){
       el("text",{x:m.l-9,y:y+bh/2+10,"text-anchor":"end","font-size":9,fill:css("--ink-3"),
         "font-variant-numeric":"tabular-nums"},svg).textContent = label;
     } else {
+      const lim = hasNames ? 29 : 14;
       el("text",{x:m.l-9,y:y+bh/2+4,"text-anchor":"end","font-size":11.5,fill:css("--ink-1")},svg)
-        .textContent = label.length>14 ? label.slice(0,13)+"…" : label;
+        .textContent = label.length>lim ? label.slice(0,lim-1)+"…" : label;
     }
     el("path",{d:`M${m.l},${y}h${Math.max(0,bw-4)}a4,4 0 0 1 4,4v${bh-8}a4,4 0 0 1 -4,4h${-Math.max(0,bw-4)}z`,
       fill:color},svg);
@@ -578,6 +579,16 @@ const sumInto = (map, key, label, paid, pt, cl) => {
 const topOf = map => [...map.values()].sort((a,b)=>b.paid-a.paid).slice(0,12);
 const cvtTops = a => (a||[]).map(([npi,p,pt,cl,nm])=>({key:npi, paid:p, patients:pt, claim_lines:cl, name:nm}));
 
+function sectorsOf(byCode, sectors){
+  const agg = new Map();
+  for (const r of byCode.values()){
+    const sect = sectors[r.key] || "Other / unclassified";
+    let a = agg.get(sect);
+    if (!a) agg.set(sect, a = {key:sect, paid:0, patients:0, claim_lines:0});
+    a.paid += r.paid; a.patients += r.patients; a.claim_lines += r.claim_lines;
+  }
+  return topOf(agg);
+}
 async function withDesc(d){
   const desc = await data("hcpcs_desc");
   for (const r of d.top_hcpcs || []) if (r.name===undefined) r.name = desc[r.key] || null;
@@ -620,6 +631,7 @@ async function staticDashboard(){
     d.summary.hcpcs_n = byCode.size;
     d.monthly = [...byMonth.values()].sort((a,b)=>a.month<b.month?-1:1);
     d.top_hcpcs = topOf(byCode);
+    d.top_sectors = sectorsOf(byCode, await data("sectors"));
     if (codes.length===1 && codeIdx.has(codes[0])){
       const tops = await data("top_providers");
       const ci = String(codeIdx.get(codes[0]));
@@ -669,6 +681,8 @@ async function staticDashboard(){
     }
     d.summary.hcpcs_n = byCode.size;
     d.top_hcpcs = topOf(byCode);
+    d.top_sectors = sectorsOf(byCode, await data("sectors"));
+    d.sectorsScope = "all months";
     d.providerScope = "all months";
     const tops = await data("top_providers_state");
     d.top_billing = cvtTops(tops.billing[String(stIdx)]);
@@ -689,6 +703,8 @@ async function staticDashboard(){
   }
   d.summary.hcpcs_n = byCode.size;
   d.top_hcpcs = topOf(byCode);
+  d.top_sectors = sectorsOf(byCode, await data("sectors"));
+  d.sectorsScope = "all months";
   d.trendScope = "unavailable";
   d.histScope = "unavailable";
   d.summaryScope = "all months";
@@ -825,6 +841,11 @@ function renderCharts(d){
     const sc = card(grid, "Spending by state"+(d.statesScope?" (all months)":""),
       ["Billing provider's NPPES registration state — not necessarily the paying state's program"], false);
     barChart(sc.box, d.top_states, {title:"states", itemLabel:"State", onClick:drillState});
+  }
+  if (d.top_sectors && d.top_sectors.length>1){
+    const xc = card(grid, "Spending by sector"+stScope+(d.sectorsScope?" (all months)":""),
+      ["Sector inferred from HCPCS/CPT code family (approximate); unmatched local codes appear as Other / unclassified"], false);
+    barChart(xc.box, d.top_sectors, {title:"sectors", itemLabel:"Sector", wideLabels:true});
   }
   if (d.histScope!=="unavailable"){
     const hc = card(grid, "Payment size per row", null, true);

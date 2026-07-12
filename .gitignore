@@ -4,3 +4,4 @@
 nohup.out
 __pycache__/
 .admin_token
+.notify_token

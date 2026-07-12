@@ -33,6 +33,13 @@ if os.path.exists(_desc_path):
     with open(_desc_path) as f:
         HCPCS_DESC = json.load(f)
 
+# Code -> service sector, inferred from code families (build_sectors.py).
+SECTORS = {}
+_sect_path = os.path.join(HERE, "data", "sectors.json")
+if os.path.exists(_sect_path):
+    with open(_sect_path) as f:
+        SECTORS = json.load(f)
+
 # Dashboard results are cached per filter combination. Results that took a
 # full scan (>3s) also persist to disk so they stay warm across restarts;
 # the unfiltered landing-page result is precomputed the same way.
@@ -155,9 +162,22 @@ def _dashboard(q):
     summary["hcpcs_n"] = sum(1 for r in hcpcs_g if r["key"] is not None)
     summary["billing_n"] = sum(1 for r in bill_g if r["key"] is not None)
     summary["servicing_n"] = sum(1 for r in serv_g if r["key"] is not None)
+    # sector rollup: fold the per-code groups through the code->sector map
+    by_sector = {}
+    for r in hcpcs_g:
+        if r["key"] is None:
+            continue
+        sect = SECTORS.get(r["key"], "Other / unclassified")
+        agg = by_sector.setdefault(sect, {"key": sect, "paid": 0,
+                                          "patients": 0, "claim_lines": 0})
+        agg["paid"] += r["paid"]
+        agg["patients"] += r["patients"]
+        agg["claim_lines"] += r["claim_lines"]
+
     return {
         "summary": summary,
         "monthly": monthly,
+        "top_sectors": top(list(by_sector.values())),
         "top_hcpcs": [{**r, "name": HCPCS_DESC.get(r["key"])}
                       for r in top([r for r in hcpcs_g if r["key"] is not None])],
         "top_billing": with_names(top([r for r in bill_g if r["key"] is not None])),
