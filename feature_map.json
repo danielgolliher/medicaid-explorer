@@ -35,5 +35,12 @@
       "0d9add2"
     ],
     "notes": "Revert 0d9add2 to roll back; sectors.json + build_sectors.py go with it."
+  },
+  "ddd22063-cec8-44e3-8795-5aa2f3aef019": {
+    "feature": "Peer-biller comparison (click provider bar)",
+    "commits": [
+      "c1db8f5"
+    ],
+    "notes": "Revert c1db8f5 to roll back."
   }
 }
