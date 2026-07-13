@@ -187,6 +187,51 @@ def _dashboard(q):
     }
 
 
+def peers(q):
+    """Compare a billing provider against other billers of its top codes.
+
+    Two scans: the subject's top codes under the current filters, then the
+    top billers across those codes under the same filters (minus any NPI
+    filter, which would exclude the peers themselves).
+    """
+    npi = (q.get("npi") or [""])[0].strip()
+    if not npi:
+        return {"error": "missing npi"}
+    scope = {k: v for k, v in q.items()
+             if k in ("month_from", "month_to", "state", "paid_min", "paid_max")}
+    where, params = build_where(scope)
+    subj_where = (where + " AND " if where else "WHERE ") + "billing_npi = ?"
+    with con_lock:
+        codes = con.execute(f"""
+            SELECT hcpcs, round(sum(paid),2) AS paid
+            FROM '{PARQUET}' {subj_where} AND hcpcs IS NOT NULL
+            GROUP BY hcpcs ORDER BY paid DESC LIMIT 8
+        """, params + [npi]).fetchall()
+    if not codes:
+        return {"codes": [], "peers": []}
+    code_list = [c for c, _ in codes]
+    ph = ",".join("?" * len(code_list))
+    peer_where = (where + " AND " if where else "WHERE ") + f"hcpcs IN ({ph})"
+    with con_lock:
+        rows = con.execute(f"""
+            SELECT billing_npi, round(sum(paid),2) AS paid, sum(patients) AS patients,
+                   sum(claim_lines) AS claim_lines, count(DISTINCT hcpcs) AS codes
+            FROM '{PARQUET}' {peer_where} AND billing_npi IS NOT NULL
+            GROUP BY billing_npi ORDER BY paid DESC LIMIT 12
+        """, params + code_list).fetchall()
+        npis = list({r[0] for r in rows} | {npi})
+        names = dict(con.execute(
+            f"SELECT npi, name FROM '{NPI_LOOKUP}' WHERE npi IN ({','.join('?'*len(npis))})",
+            npis).fetchall())
+    return {
+        "codes": [{"code": c, "desc": HCPCS_DESC.get(c), "paid": p} for c, p in codes],
+        "peers": [{"key": r[0], "name": names.get(r[0]), "paid": r[1],
+                   "patients": r[2], "claim_lines": r[3], "codes": r[4]}
+                  for r in rows],
+        "subject": {"key": npi, "name": names.get(npi)},
+    }
+
+
 SORTABLE = {"month", "hcpcs", "billing_npi", "servicing_npi", "billing_state",
             "patients", "claim_lines", "paid"}
 
@@ -250,6 +295,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(dashboard(q))
             elif url.path == "/api/rows":
                 self.send_json(table_rows(q))
+            elif url.path == "/api/peers":
+                self.send_json(peers(q))
             elif url.path.startswith("/static/"):
                 name = os.path.basename(url.path)
                 ctype = ("image/svg+xml" if name.endswith(".svg")

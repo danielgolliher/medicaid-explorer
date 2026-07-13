@@ -389,7 +389,9 @@ function barChart(box, items, opts){
   items.forEach((d,i)=>{
     const y = m.t+i*rowH, bh = Math.min(20,rowH-6);
     const bw = Math.max(2,(d.paid/maxV)*iw);
-    const color = css(SEQ[Math.min(i,SEQ.length-1)]);
+    const color = opts.emphasisKey
+      ? (d.key===opts.emphasisKey ? css("--seq-450") : "#898781")
+      : css(SEQ[Math.min(i,SEQ.length-1)]);
     const label = d.key===null||d.key===undefined||d.key==="" ? "—" : String(d.key);
     if (d.name && opts.keyFirst){
       el("text",{x:m.l-9,y:y+bh/2-1,"text-anchor":"end","font-size":11,"font-weight":600,fill:css("--ink-1")},svg)
@@ -608,10 +610,33 @@ function renderCharts(d){
       onClick:p.drill ? (key=>{ if (key==null) return;
         state[p.drill] = String(key); writeInputs(); refresh(); }) : null});
   }
+  if (state.billing_npi) renderPeersCard(grid);
   // histogram
   const hc = card(grid, "Payment size per row", null, true);
   hc.c.querySelector(".why").textContent = "Distribution of paid amounts across rows in this view (log-scale buckets). Hover for counts.";
   histChart(hc.box, d.hist);
+}
+
+/* ---------- peer comparison (billing NPI in filter) ---------- */
+async function renderPeersCard(grid){
+  const pc = card(grid, "Peer billers on the same codes", null, true);
+  pc.c.querySelector(".why").textContent = "Loading peer comparison…";
+  const f = {};
+  for (const k of ["month_from","month_to","state","paid_min","paid_max"])
+    if (state[k]) f[k] = state[k];
+  const d = await fetch("/api/peers?"+qs({...f, npi:state.billing_npi})).then(r=>r.json());
+  if (!d.peers || !d.peers.length){
+    pc.c.querySelector(".why").textContent = "No peer data for this provider under the current filters.";
+    return;
+  }
+  const subj = d.subject.name || d.subject.key;
+  const codesTxt = d.codes.map(c=>c.code+(c.desc?" ("+c.desc+")":"")).join(" · ");
+  pc.c.querySelector("h3").textContent = "Peer billers on the same codes — "+subj;
+  pc.c.querySelector(".why").textContent =
+    "Top billers across "+subj+"'s top "+d.codes.length+" codes under the current filters: "
+    + codesTxt + ". The selected provider is highlighted.";
+  barChart(pc.box, d.peers, {title:"peers", itemLabel:"NPI",
+    emphasisKey:d.subject.key, wideLabels:true});
 }
 
 /* ---------- table ---------- */

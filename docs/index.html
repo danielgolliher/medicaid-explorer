@@ -481,7 +481,9 @@ function barChart(box, items, opts){
   items.forEach((d,i)=>{
     const y = m.t+i*rowH, bh = Math.min(20,rowH-6);
     const bw = Math.max(2,(d.paid/maxV)*iw);
-    const color = css(SEQ[Math.min(i,SEQ.length-1)]);
+    const color = opts.emphasisKey
+      ? (d.key===opts.emphasisKey ? css("--seq-450") : "#898781")
+      : css(SEQ[Math.min(i,SEQ.length-1)]);
     const label = d.key===null||d.key===undefined||d.key==="" ? "—" : String(d.key);
     if (d.name && opts.keyFirst){
       el("text",{x:m.l-9,y:y+bh/2-1,"text-anchor":"end","font-size":11,"font-weight":600,fill:css("--ink-1")},svg)
@@ -511,7 +513,7 @@ function barChart(box, items, opts){
       {value:fmtNum(d.patients), label:"patients"},
       {value:fmtNum(d.claim_lines), label:"claim lines"},
     ];
-    if (canDrill) ttRows.push({value:"Click to filter to this "+opts.itemLabel.toLowerCase(), label:""});
+    if (canDrill) ttRows.push({value:opts.clickHint || ("Click to filter to this "+opts.itemLabel.toLowerCase()), label:""});
     const tip = ev => showTip(ev.clientX ?? innerWidth/2, ev.clientY ?? innerHeight/2,
       opts.itemLabel+" "+label+(d.name?" — "+d.name:""), ttRows);
     hit.addEventListener("pointermove",tip);
@@ -711,6 +713,65 @@ async function staticDashboard(){
   return withDesc(d);
 }
 
+/* ---------- peer comparison (click a provider bar) ---------- */
+let selectedPeer = null;
+async function computePeers(npi, role){
+  const [tops, meta, desc] = await Promise.all([
+    data("top_providers"), data("meta"), data("hcpcs_desc")]);
+  const lists = tops[role];
+  const hits = [];
+  for (const [ci, arr] of Object.entries(lists)){
+    const hit = (arr||[]).find(e=>e[0]===npi);
+    if (hit) hits.push({ci:+ci, paid:hit[1]});
+  }
+  hits.sort((a,b)=>b.paid-a.paid);
+  const useCodes = hits.slice(0,8);
+  const agg = new Map();
+  for (const {ci} of useCodes)
+    for (const [pnpi,p,pt,cl,nm] of lists[String(ci)]){
+      let a = agg.get(pnpi);
+      if (!a) agg.set(pnpi, a={key:pnpi, name:nm, paid:0, patients:0, claim_lines:0, codes:0});
+      a.paid+=p; a.patients+=pt; a.claim_lines+=cl; a.codes++;
+    }
+  const ranked = [...agg.values()].sort((a,b)=>b.paid-a.paid);
+  const peers = ranked.filter(r=>r.key===npi)
+    .concat(ranked.filter(r=>r.key!==npi)).slice(0,12)
+    .sort((a,b)=>b.paid-a.paid);
+  return {
+    codes: useCodes.map(c=>({code:meta.codes[c.ci], desc:desc[meta.codes[c.ci]]||null})),
+    peers,
+  };
+}
+async function renderPeersStatic(){
+  document.getElementById("peers-card")?.remove();
+  if (!selectedPeer) return;
+  const grid = $("charts");
+  const pc = card(grid, "Peer "+selectedPeer.role+" providers on the same codes", null, true);
+  pc.c.id = "peers-card";
+  pc.c.querySelector(".why").textContent = "Loading peer comparison…";
+  const close = document.createElement("button"); close.className = "chip";
+  close.textContent = "× Close"; close.style.cssFloat = "right";
+  close.onclick = ()=>{ selectedPeer = null; renderPeersStatic(); };
+  pc.c.insertBefore(close, pc.c.firstChild);
+  const d = await computePeers(selectedPeer.npi, selectedPeer.role);
+  if (!d.peers.length){
+    pc.c.querySelector(".why").textContent =
+      "This provider doesn't appear in any code's top-12 list, so the static snapshot can't build a comparison.";
+    return;
+  }
+  const subj = d.peers.find(p=>p.key===selectedPeer.npi);
+  const subjName = (subj && subj.name) || selectedPeer.npi;
+  pc.c.querySelector("h3").textContent =
+    "Peer "+selectedPeer.role+" providers on the same codes — "+subjName;
+  pc.c.querySelector(".why").textContent =
+    "Total paid across "+subjName+"'s top "+d.codes.length+" codes: "
+    + d.codes.map(c=>c.code+(c.desc?" ("+c.desc+")":"")).join(" · ")
+    + ". All states and months; a peer is counted only on codes where it ranks in that code's top 12, so peer totals are floors. The selected provider is highlighted.";
+  barChart(pc.box, d.peers, {title:"peers", itemLabel:"NPI",
+    emphasisKey:selectedPeer.npi, wideLabels:true});
+  pc.c.scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+
 /* ---------- KPI tiles ---------- */
 function renderKpis(s){
   const box = $("kpis"); box.textContent = "";
@@ -814,11 +875,14 @@ function renderCharts(d){
   const stScope = state.state ? " · "+state.state : "";
   if ((codes.length===1 || state.state) && d.top_servicing.length){
     const who = codes.length===1 ? codes[0] : state.state;
+    const peerOpen = role => key => { selectedPeer = {npi:String(key), role}; renderPeersStatic(); };
     const a = card(grid, "Top servicing providers · "+who+provNote,
       ["Auto-selected because you filtered to ",who], false);
-    barChart(a.box, d.top_servicing, {title:"servicing", itemLabel:"NPI"});
+    barChart(a.box, d.top_servicing, {title:"servicing", itemLabel:"NPI",
+      onClick:peerOpen("servicing"), clickHint:"Click to compare with peer providers"});
     const b = card(grid, "Top billing providers · "+who+provNote, null, false);
-    barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
+    barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI",
+      onClick:peerOpen("billing"), clickHint:"Click to compare with peer providers"});
     if (d.top_hcpcs.length>1){
       const c = card(grid, "Spending by code"+stScope+(d.providerScope?" (all months)":""),
         ["Descriptions: CMS HCPCS Level II; CPT/CDT codes show none (AMA/ADA licensing)"], true);
@@ -830,7 +894,9 @@ function renderCharts(d){
     barChart(a.box, d.top_hcpcs, {title:"codes", itemLabel:"Code", keyFirst:true, onClick:drillCode});
     if (d.top_billing.length){
       const b = card(grid, "Top billing providers", null, false);
-      barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI"});
+      barChart(b.box, d.top_billing, {title:"billing", itemLabel:"NPI",
+        onClick:key=>{ selectedPeer={npi:String(key), role:"billing"}; renderPeersStatic(); },
+        clickHint:"Click to compare with peer providers"});
     } else if (!state.state) {
       const b = card(grid, "Top billing providers", null, false);
       b.c.querySelector(".why").textContent =
@@ -916,6 +982,7 @@ async function loadRows(){
 
 /* ---------- main refresh ---------- */
 async function refresh(){
+  selectedPeer = null;
   renderPills();
   const h = qs(activeFilters());
   history.replaceState(null, "", h ? "#"+h : location.pathname);
