@@ -42,5 +42,12 @@
       "c1db8f5"
     ],
     "notes": "Revert c1db8f5 to roll back."
+  },
+  "669dd99e-4ad6-4eb7-b61f-2383dccc4bac": {
+    "feature": "Sector leaders (per-sector top-biller comparison)",
+    "commits": [
+      "a6b4a24"
+    ],
+    "notes": "Revert a6b4a24 to roll back."
   }
 }
