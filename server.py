@@ -187,6 +187,52 @@ def _dashboard(q):
     }
 
 
+if SECTORS:
+    con.execute("CREATE TEMP TABLE sector_map(hcpcs VARCHAR, sector VARCHAR)")
+    con.executemany("INSERT INTO sector_map VALUES (?, ?)", list(SECTORS.items()))
+
+
+def sector_leaders(q):
+    """Top billers per sector under the current filters, one scan."""
+    key = "sector_leaders:" + json.dumps({k: q[k] for k in sorted(q)
+        if k in ("month_from", "month_to", "hcpcs", "state", "paid_min", "paid_max")})
+    with dash_cache_lock:
+        if key in dash_cache:
+            return dash_cache[key]
+    scoped = {k: v for k, v in q.items()
+              if k in ("month_from", "month_to", "hcpcs", "state", "paid_min", "paid_max")}
+    where, params = build_where(scoped)
+    where = where.replace("month", "p.month").replace("hcpcs", "p.hcpcs") \
+                 .replace("billing_state", "p.billing_state").replace("paid", "p.paid")
+    t0 = time.time()
+    with con_lock:
+        rows = con.execute(f"""
+            WITH g AS (
+              SELECT m.sector, p.billing_npi AS npi, round(sum(p.paid),2) AS paid,
+                     sum(p.patients) AS patients, sum(p.claim_lines) AS claim_lines,
+                     row_number() OVER (PARTITION BY m.sector ORDER BY sum(p.paid) DESC) AS rk
+              FROM '{PARQUET}' p JOIN sector_map m ON p.hcpcs = m.hcpcs
+              {where}{" AND" if where else "WHERE"} p.billing_npi IS NOT NULL
+              GROUP BY 1, 2
+            )
+            SELECT g.sector, g.npi, g.paid, g.patients, g.claim_lines, l.name
+            FROM g LEFT JOIN '{NPI_LOOKUP}' l ON g.npi = l.npi
+            WHERE g.rk <= 8 ORDER BY g.sector, g.paid DESC
+        """, params).fetchall()
+    leaders = {}
+    for sect, npi, p, pt, cl, nm in rows:
+        leaders.setdefault(sect, []).append(
+            {"key": npi, "paid": p, "patients": pt, "claim_lines": cl, "name": nm})
+    result = {"sectors": leaders}
+    if time.time() - t0 > 3:
+        path = os.path.join(CACHE_DIR, hashlib.md5(key.encode()).hexdigest() + ".json")
+        with open(path, "w") as f:
+            json.dump({"key": key, "result": result}, f)
+    with dash_cache_lock:
+        dash_cache[key] = result
+    return result
+
+
 def peers(q):
     """Compare a billing provider against other billers of its top codes.
 
@@ -297,6 +343,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(table_rows(q))
             elif url.path == "/api/peers":
                 self.send_json(peers(q))
+            elif url.path == "/api/sector_leaders":
+                self.send_json(sector_leaders(q))
             elif url.path.startswith("/static/"):
                 name = os.path.basename(url.path)
                 ctype = ("image/svg+xml" if name.endswith(".svg")

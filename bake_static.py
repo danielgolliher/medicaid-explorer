@@ -145,3 +145,28 @@ for name in os.listdir(os.path.join(HERE, "data", "cache")):
 
 for name in sorted(os.listdir(OUT)):
     print(f"{name}: {os.path.getsize(os.path.join(OUT, name))/1e6:.1f} MB")
+
+print("sector leaders ...")
+with open(os.path.join(HERE, "data", "sectors.json")) as f:
+    sector_map = json.load(f)
+con.execute("CREATE TEMP TABLE sector_map(hcpcs VARCHAR, sector VARCHAR)")
+con.executemany("INSERT INTO sector_map VALUES (?, ?)", list(sector_map.items()))
+rows = con.execute(f"""
+    WITH g AS (
+      SELECT m.sector, p.billing_npi AS npi, round(sum(p.paid),2) AS paid,
+             sum(p.patients) AS patients, sum(p.claim_lines) AS claim_lines,
+             row_number() OVER (PARTITION BY m.sector ORDER BY sum(p.paid) DESC) AS rk
+      FROM '{P}' p JOIN sector_map m ON p.hcpcs = m.hcpcs
+      WHERE p.billing_npi IS NOT NULL
+      GROUP BY 1, 2
+    )
+    SELECT g.sector, g.npi, g.paid, g.patients, g.claim_lines, l.name
+    FROM g LEFT JOIN '{NPI_LOOKUP}' l ON g.npi = l.npi
+    WHERE g.rk <= 8 ORDER BY g.sector, g.paid DESC
+""").fetchall()
+leaders = {}
+for sect, npi, p, pt, cl, nm in rows:
+    leaders.setdefault(sect, []).append([npi, p, pt, cl, nm])
+with open(os.path.join(OUT, "sector_leaders.json"), "w") as f:
+    json.dump(leaders, f, separators=(",", ":"))
+print("  sectors:", len(leaders))

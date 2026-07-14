@@ -611,10 +611,36 @@ function renderCharts(d){
         state[p.drill] = String(key); writeInputs(); refresh(); }) : null});
   }
   if (state.billing_npi) renderPeersCard(grid);
+  loadSectorLeaders(grid);
   // histogram
   const hc = card(grid, "Payment size per row", null, true);
   hc.c.querySelector(".why").textContent = "Distribution of paid amounts across rows in this view (log-scale buckets). Hover for counts.";
   histChart(hc.box, d.hist);
+}
+
+function renderSectorLeaders(grid, leaders, note){
+  const order = Object.entries(leaders)
+    .map(([sect, arr])=>({sect, arr, total:arr.reduce((s,e)=>s+(e.paid??e[1]),0)}))
+    .sort((a,b)=>b.total-a.total);
+  if (!order.length) return;
+  const head = card(grid, "Sector leaders — each sector's top billers", null, true);
+  head.c.querySelector(".why").textContent =
+    "Each sector's leading biller (highlighted) against its peers on that sector's codes. " + note;
+  head.box.remove();
+  for (const {sect, arr} of order){
+    const items = arr.map(e => Array.isArray(e)
+      ? {key:e[0], paid:e[1], patients:e[2], claim_lines:e[3], name:e[4]}
+      : e);
+    const sc = card(grid, sect, null, false);
+    barChart(sc.box, items, {title:sect, itemLabel:"NPI", emphasisKey:items[0] && items[0].key});
+  }
+}
+
+async function loadSectorLeaders(grid){
+  try {
+    const d = await fetch("/api/sector_leaders?"+qs(activeFilters())).then(r=>r.json());
+    if (d.sectors) renderSectorLeaders(grid, d.sectors, "Scoped to your current filters.");
+  } catch(e){ console.warn("sector leaders failed", e); }
 }
 
 /* ---------- peer comparison (billing NPI in filter) ---------- */

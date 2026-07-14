@@ -713,6 +713,32 @@ async function staticDashboard(){
   return withDesc(d);
 }
 
+function renderSectorLeaders(grid, leaders, note){
+  const order = Object.entries(leaders)
+    .map(([sect, arr])=>({sect, arr, total:arr.reduce((s,e)=>s+(e.paid??e[1]),0)}))
+    .sort((a,b)=>b.total-a.total);
+  if (!order.length) return;
+  const head = card(grid, "Sector leaders — each sector's top billers", null, true);
+  head.c.querySelector(".why").textContent =
+    "Each sector's leading biller (highlighted) against its peers on that sector's codes. " + note;
+  head.box.remove();
+  for (const {sect, arr} of order){
+    const items = arr.map(e => Array.isArray(e)
+      ? {key:e[0], paid:e[1], patients:e[2], claim_lines:e[3], name:e[4]}
+      : e);
+    const sc = card(grid, sect, null, false);
+    barChart(sc.box, items, {title:sect, itemLabel:"NPI", emphasisKey:items[0] && items[0].key});
+  }
+}
+
+async function loadSectorLeaders(grid){
+  try {
+    const leaders = await data("sector_leaders");
+    renderSectorLeaders(grid, leaders,
+      "All states and months — the static snapshot can't scope this section to your filters.");
+  } catch(e){ console.warn("sector leaders failed", e); }
+}
+
 /* ---------- peer comparison (click a provider bar) ---------- */
 let selectedPeer = null;
 async function computePeers(npi, role){
@@ -913,6 +939,7 @@ function renderCharts(d){
       ["Sector inferred from HCPCS/CPT code family (approximate); unmatched local codes appear as Other / unclassified"], false);
     barChart(xc.box, d.top_sectors, {title:"sectors", itemLabel:"Sector", wideLabels:true});
   }
+  loadSectorLeaders(grid);
   if (d.histScope!=="unavailable"){
     const hc = card(grid, "Payment size per row", null, true);
     hc.c.querySelector(".why").textContent =
