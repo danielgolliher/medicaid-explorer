@@ -153,6 +153,7 @@ td.null{color:var(--ink-3)}
     <div class="f"><label>Billing NPI</label><input type="text" id="f-billing" placeholder="10-digit NPI"></div>
     <div class="f"><label>Servicing NPI</label><input type="text" id="f-servicing" placeholder="10-digit NPI"></div>
     <div class="f"><label>State</label><select id="f-state"><option value="">All states</option></select></div>
+    <div class="f"><label>Provider search</label><input type="text" id="f-provider" placeholder="e.g. HeroCare"></div>
     <div class="f"><label>Paid / row ≥</label><input type="text" class="money" id="f-min" placeholder="$ min"></div>
     <div class="f"><label>Paid / row ≤</label><input type="text" class="money" id="f-max" placeholder="$ max"></div>
     <button class="btn primary" id="apply">Apply</button>
@@ -643,6 +644,32 @@ async function loadSectorLeaders(grid){
   } catch(e){ console.warn("sector leaders failed", e); }
 }
 
+/* ---------- provider search ---------- */
+async function renderProviderSearch(){
+  const qtext = $("f-provider").value.trim();
+  document.getElementById("search-card")?.remove();
+  if (qtext.length < 3) return;
+  const grid = $("charts");
+  const sc = card(grid, "Provider search — \u201C"+qtext+"\u201D", null, true);
+  sc.c.id = "search-card";
+  grid.prepend(sc.c);
+  sc.c.querySelector(".why").textContent = "Searching\u2026";
+  const d = await fetch("/api/find_provider?"+qs({name:qtext})).then(r=>r.json());
+  const hits = d.matches || [];
+  sc.c.querySelector(".why").textContent = hits.length
+    ? "Click a provider to filter the dashboard to it (its peer comparison appears below the charts)."
+    : "No billing provider matches that name.";
+  for (const m of hits){
+    const row = document.createElement("button");
+    row.className = "chip";
+    row.style.cssText = "display:block;width:100%;text-align:left;margin:4px 0;border-radius:9px";
+    row.textContent = (m.name||m.key) + "  \u00B7  NPI " + m.key + "  \u00B7  " + (m.state||"\u2014")
+      + "  \u00B7  " + fmtMoney(m.paid) + " total";
+    row.onclick = ()=>{ state.billing_npi = m.key; $("f-provider").value=""; writeInputs(); refresh(); };
+    sc.box.append(row);
+  }
+}
+
 /* ---------- peer comparison (billing NPI in filter) ---------- */
 async function renderPeersCard(grid){
   const pc = card(grid, "Peer billers on the same codes", null, true);
@@ -779,6 +806,8 @@ async function init(){
   for (const k of Object.keys(PILL_LABELS)) if (hash.get(k)) state[k] = hash.get(k);
   writeInputs();
   $("apply").onclick = ()=>{ readInputs(); refresh(); };
+  $("f-provider").addEventListener("keydown", e=>{
+    if (e.key==="Enter"){ e.stopPropagation(); renderProviderSearch(); }});
   $("reset").onclick = ()=>{
     for (const k of Object.keys(PILL_LABELS)) state[k]="";
     state.page=0; writeInputs(); refresh();

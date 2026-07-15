@@ -170,3 +170,34 @@ for sect, npi, p, pt, cl, nm in rows:
 with open(os.path.join(OUT, "sector_leaders.json"), "w") as f:
     json.dump(leaders, f, separators=(",", ":"))
 print("  sectors:", len(leaders))
+
+print("provider search index ...")
+rows = con.execute(f"""
+    WITH t AS (
+      SELECT billing_npi AS npi, hcpcs, sum(paid) AS p
+      FROM '{P}' WHERE billing_npi IS NOT NULL AND hcpcs IS NOT NULL
+      GROUP BY 1, 2
+    ), tot AS (
+      SELECT npi, round(sum(p),2) AS total FROM t GROUP BY 1
+      HAVING sum(p) >= 1000000
+    ), ranked AS (
+      SELECT t.npi, t.hcpcs, t.p,
+             row_number() OVER (PARTITION BY t.npi ORDER BY t.p DESC) AS rk
+      FROM t JOIN tot ON t.npi = tot.npi
+    )
+    SELECT r.npi, any_value(tot.total),
+           list(r.hcpcs ORDER BY r.p DESC),
+           round(sum(r.p),2) AS paid_on_codes,
+           any_value(l.name), any_value(l.state)
+    FROM ranked r
+    JOIN tot ON r.npi = tot.npi
+    LEFT JOIN '{NPI_LOOKUP}' l ON r.npi = l.npi
+    WHERE r.rk <= 8
+    GROUP BY r.npi
+""").fetchall()
+index = [[npi, nm, st, total, [code_idx[c] for c in cl if c in code_idx], poc]
+         for npi, total, cl, poc, nm, st in rows]
+index.sort(key=lambda e: -e[3])
+with open(os.path.join(OUT, "provider_index.json"), "w") as f:
+    json.dump(index, f, separators=(",", ":"))
+print(f"  providers: {len(index)}, size: {os.path.getsize(os.path.join(OUT,'provider_index.json'))/1e6:.1f} MB")

@@ -209,6 +209,7 @@ td.null{color:var(--ink-3)}
     <div class="f"><label>To</label><select id="f-to"></select></div>
     <div class="f"><label>HCPCS code(s)</label><input type="text" id="f-hcpcs" placeholder="e.g. T1019, 99213"></div>
     <div class="f"><label>State</label><select id="f-state"><option value="">All states</option></select></div>
+    <div class="f"><label>Provider search</label><input type="text" id="f-provider" placeholder="e.g. HeroCare"></div>
     <button class="btn primary" id="apply">Apply</button>
     <button class="btn ghost" id="reset">Reset</button>
   </div>
@@ -739,19 +740,56 @@ async function loadSectorLeaders(grid){
   } catch(e){ console.warn("sector leaders failed", e); }
 }
 
+/* ---------- provider search (billers >= $1M) ---------- */
+async function searchProviders(qtext){
+  const idx = await data("provider_index");
+  const needle = qtext.toUpperCase();
+  return idx.filter(e => (e[1]||"").toUpperCase().includes(needle)).slice(0,10);
+}
+async function renderProviderSearch(){
+  const qtext = $("f-provider").value.trim();
+  document.getElementById("search-card")?.remove();
+  if (qtext.length < 3) return;
+  const grid = $("charts");
+  const sc = card(grid, "Provider search — \u201C"+qtext+"\u201D", null, true);
+  sc.c.id = "search-card";
+  grid.prepend(sc.c);
+  sc.c.querySelector(".why").textContent = "Searching\u2026";
+  const hits = await searchProviders(qtext);
+  sc.c.querySelector(".why").textContent = hits.length
+    ? "Click a provider to compare it against billers of the same codes. Search covers the "
+      + "95,898 billing providers with \u2265$1M total paid."
+    : "No match among the 95,898 billing providers with \u2265$1M total paid. "
+      + "Smaller providers are only in the local app's search.";
+  for (const e of hits){
+    const row = document.createElement("button");
+    row.className = "chip";
+    row.style.cssText = "display:block;width:100%;text-align:left;margin:4px 0;border-radius:9px";
+    row.textContent = (e[1]||e[0]) + "  \u00B7  NPI " + e[0] + "  \u00B7  " + (e[2]||"\u2014")
+      + "  \u00B7  " + fmtMoney(e[3]) + " total";
+    row.onclick = ()=>{ selectedPeer = {npi:e[0], role:"billing", entry:e}; renderPeersStatic(); };
+    sc.box.append(row);
+  }
+}
+
 /* ---------- peer comparison (click a provider bar) ---------- */
 let selectedPeer = null;
-async function computePeers(npi, role){
+async function computePeers(npi, role, entry){
   const [tops, meta, desc] = await Promise.all([
     data("top_providers"), data("meta"), data("hcpcs_desc")]);
   const lists = tops[role];
-  const hits = [];
-  for (const [ci, arr] of Object.entries(lists)){
-    const hit = (arr||[]).find(e=>e[0]===npi);
-    if (hit) hits.push({ci:+ci, paid:hit[1]});
+  let useCodes;
+  if (entry){
+    useCodes = entry[4].map(ci=>({ci}));
+  } else {
+    const hits = [];
+    for (const [ci, arr] of Object.entries(lists)){
+      const hit = (arr||[]).find(e=>e[0]===npi);
+      if (hit) hits.push({ci:+ci, paid:hit[1]});
+    }
+    hits.sort((a,b)=>b.paid-a.paid);
+    useCodes = hits.slice(0,8);
   }
-  hits.sort((a,b)=>b.paid-a.paid);
-  const useCodes = hits.slice(0,8);
   const agg = new Map();
   for (const {ci} of useCodes)
     for (const [pnpi,p,pt,cl,nm] of lists[String(ci)]){
@@ -759,6 +797,8 @@ async function computePeers(npi, role){
       if (!a) agg.set(pnpi, a={key:pnpi, name:nm, paid:0, patients:0, claim_lines:0, codes:0});
       a.paid+=p; a.patients+=pt; a.claim_lines+=cl; a.codes++;
     }
+  if (entry && !agg.has(npi))
+    agg.set(npi, {key:npi, name:entry[1], paid:entry[5], patients:null, claim_lines:null, codes:useCodes.length});
   const ranked = [...agg.values()].sort((a,b)=>b.paid-a.paid);
   const peers = ranked.filter(r=>r.key===npi)
     .concat(ranked.filter(r=>r.key!==npi)).slice(0,12)
@@ -779,7 +819,7 @@ async function renderPeersStatic(){
   close.textContent = "× Close"; close.style.cssFloat = "right";
   close.onclick = ()=>{ selectedPeer = null; renderPeersStatic(); };
   pc.c.insertBefore(close, pc.c.firstChild);
-  const d = await computePeers(selectedPeer.npi, selectedPeer.role);
+  const d = await computePeers(selectedPeer.npi, selectedPeer.role, selectedPeer.entry);
   if (!d.peers.length){
     pc.c.querySelector(".why").textContent =
       "This provider doesn't appear in any code's top-12 list, so the static snapshot can't build a comparison.";
@@ -1073,6 +1113,8 @@ async function init(){
   for (const k of Object.keys(PILL_LABELS)) if (hash.get(k)) state[k] = hash.get(k);
   writeInputs();
   $("apply").onclick = ()=>{ readInputs(); state.outliers=""; refresh(); };
+  $("f-provider").addEventListener("keydown", e=>{
+    if (e.key==="Enter"){ e.stopPropagation(); renderProviderSearch(); }});
   $("reset").onclick = ()=>{
     for (const k of Object.keys(PILL_LABELS)) state[k]="";
     state.page=0; writeInputs(); refresh();

@@ -233,6 +233,25 @@ def sector_leaders(q):
     return result
 
 
+def find_provider(q):
+    """Name search over NPPES joined to billing totals in the dataset."""
+    name = (q.get("name") or [""])[0].strip()
+    if len(name) < 3:
+        return {"error": "need at least 3 characters"}
+    with con_lock:
+        rows = con.execute(f"""
+            WITH hits AS (
+                SELECT npi, name, state FROM '{NPI_LOOKUP}'
+                WHERE name ILIKE ? LIMIT 400
+            )
+            SELECT h.npi, h.name, h.state, round(sum(s.paid),2) AS paid
+            FROM hits h JOIN '{PARQUET}' s ON s.billing_npi = h.npi
+            GROUP BY 1, 2, 3 ORDER BY paid DESC LIMIT 10
+        """, [f"%{name}%"]).fetchall()
+    return {"matches": [{"key": r[0], "name": r[1], "state": r[2], "paid": r[3]}
+                        for r in rows]}
+
+
 def peers(q):
     """Compare a billing provider against other billers of its top codes.
 
@@ -345,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(peers(q))
             elif url.path == "/api/sector_leaders":
                 self.send_json(sector_leaders(q))
+            elif url.path == "/api/find_provider":
+                self.send_json(find_provider(q))
             elif url.path.startswith("/static/"):
                 name = os.path.basename(url.path)
                 ctype = ("image/svg+xml" if name.endswith(".svg")
