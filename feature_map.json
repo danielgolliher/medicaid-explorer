@@ -49,5 +49,12 @@
       "a6b4a24"
     ],
     "notes": "Revert a6b4a24 to roll back."
+  },
+  "ed134049-179f-4f15-9e96-42b6a0b3e52f": {
+    "feature": "Provider search + peers for searched provider",
+    "commits": [
+      "1f077d2"
+    ],
+    "notes": "Revert to roll back; provider_index.json goes with it."
   }
 }
